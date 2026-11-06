@@ -24,7 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from pickvedio_core import __version__
+from pickvedio_core import __version__, install_spec
 from pickvedio_core.config import Settings
 from pickvedio_core.errors import (
     AuthRequired,
@@ -81,7 +81,9 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
         from fastapi.responses import JSONResponse
         from fastapi.security import HTTPBearer  # noqa: F401 - documents the scheme in OpenAPI
     except ImportError as exc:  # pragma: no cover
-        raise DependencyError("服务依赖未安装：pip install 'pickvedio-core[service]'") from exc
+        raise DependencyError(
+            f"服务依赖未安装：python3 -m pip install \"{install_spec('service')}\""
+        ) from exc
 
     settings = settings or Settings.load()
     store = JobStore(settings.workdir / "jobs.sqlite3")

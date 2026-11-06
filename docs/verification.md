@@ -247,6 +247,49 @@ OpenAI 兼容桩（本会话没有可用的付费 key）。
 B 站页面自己的 `player/v2` 请求也拿到空列表（这是关键对照：排除了"我请求写法错了"），
 YouTube 列出了 6 条轨道但每一次正文请求（包括页面自己的）都返回 0 字节。
 
+## 5d. 安装路径本身是个缺陷 / the documented install route did not exist
+
+需求审计（不是 CI）发现的：交付物里九处写着 `pip install pickvedio-core`
+（七处文档 + `pvc serve` 与 `create_app()` 两处运行时 hint），而这个名字
+从来没发到 PyPI。实测证据：
+
+```
+$ curl -o /dev/null -w '%{http_code}' https://pypi.org/pypi/pickvedio-core/json
+404
+$ curl -o /dev/null -w '%{http_code}' https://pypi.org/pypi/pickvedio/json
+404
+```
+
+对 Muse 这类 agent 来说这不是笔误，而是死路：它会看到
+`ERROR: No matching distribution found for pickvedio-core`，并按 `SKILL.md` 的规则
+把它当成工具本身的 bug 来汇报。更糟的是两处运行时报错（`pvc serve` 缺 uvicorn、
+`create_app()` 缺 fastapi）自己也在推荐这条死路。
+
+替代命令实测可用（在本机，非 CI）：
+
+```
+$ python -m pip install --dry-run --no-deps "pickvedio-core[service] @ git+https://github.com/smartlotus/pickvedio-agent@main"
+  Resolved https://github.com/smartlotus/pickvedio-agent to commit b200c8c8ef5ca621a97c88f4874aa2675bcc1f35
+Would install pickvedio-core-1.0.0
+```
+
+改动与门禁：
+
+- 文档与两处运行时 hint 改为带 `git+` 的版本号锁定地址；`.[media]` / `.[local-asr]`
+  这类相对 extras 形式**保留不动**，因为它们只在 checkout 内被触发，那种场景下它们是对的。
+- `pickvedio_core.install_spec(extra)` 成为唯一的拼接口径，pin 直接跟 `__version__`，
+  所以版本号与安装地址不可能各说各话。
+- CI 新增 `Install (documented route)` job，三件事：
+  (a) 扫描 10 份随包文档，任何"看起来像 shell 命令"的行（`#` 注释与散文里的警告除外）
+  若安装裸名字就红；负对照 `python3 -m pip install "pickvedio-core[service]"` 必须被
+  同一个分类器抓住，否则这一步自己先失败——防止量具空转。
+  (b) 在干净 venv 里、checkout 之外，逐字执行文档给的那条命令，再跑 `pvc --help`
+  与 `pvc check`（离线自检，`network_used: false`）。
+  (c) `grep -F` 断言 README 快速开始里出现的就是 CI 用的那个字符串——文档与门禁不许漂移。
+- `release.yml` 的 PyPI job 现在要 `vars.PYPI_PUBLISH == 'true'` 才跑。旧的写法是"tag 一推
+  pypi job 必红，因为 trusted publishing 还没配"，那会让一次正常发布看起来像失败发布；
+  默认跳过、配好变量后一键启用，才是诚实的默认态。
+
 ## 6. 尚未验证 / still to verify after deployment
 
 - A real Railway (or other) deploy answering `/healthz` over the public internet.

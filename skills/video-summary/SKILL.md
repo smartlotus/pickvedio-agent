@@ -23,10 +23,18 @@ machine (the normal Muse-VM case), the CLI lives at `.venv/bin/pvc` after
 `bash bootstrap.sh`, and there is no HTTP service at all: `pvc push` runs the
 whole job locally. `--service`/`PVC_SERVICE_URL` is only for a hosted deployment.
 
-If `pvc` is missing:
-`python3 -m pip install --user pickvedio-core`, or `pip install -e .` from a
-clone of the repo (extras: `media` for yt-dlp, `local-asr` for faster-whisper,
-`service` for the FastAPI app).
+If `pvc` is missing, install from this repository -- `pickvedio-core` is not on
+PyPI, so a bare `pip install pickvedio-core` fails with "No matching distribution
+found" and that is an install-path mistake, not a bug in the tool:
+
+```bash
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.0"
+```
+
+Extras go inside the bracket before the `@`:
+`pickvedio-core[service]` for the FastAPI app, `[media]` for yt-dlp,
+`[local-asr]` for faster-whisper. From a clone, `bash bootstrap.sh` (or
+`pip install -e '.[dev]'`) is cheaper because it also runs the self-test.
 
 Core commands:
 - `pvc status [--service <url>]`

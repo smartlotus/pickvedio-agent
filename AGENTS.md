@@ -51,7 +51,9 @@ It ends with `verdict: READY` or a named failure; CI runs the same two commands
 from a fresh clone. Manual route, if you prefer:
 
 ```
-pip install -e '.[service,media]'        # or: pip install pickvedio-core
+pip install -e '.[service,media]'        # in the checkout; off-checkout use the git+ URL
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.0"
+                                        # the PyPI name does not exist -- see docs gate in ci.yml
 uvicorn service.app:app --host 0.0.0.0 --port "$PORT"
 ```
 

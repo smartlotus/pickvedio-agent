@@ -39,7 +39,8 @@ video-summary: {status: available}
 诚实说明：以上是 Muse 自带 skill 的确切磁盘结构与命名约定（对照 `calendly` 的
 `SKILL.md` / `manifest.yaml` 写的）。用户自备的 skill 能否被官方加载、以及在 VM 重建后是否
 保留，我没有验证过——如果加载不了，仍然可用的路径是：把 §1 的服务部署好，然后在对话里直接让
-Muse 克隆仓库、`pip install --user pickvedio-core`，并让它读
+Muse 克隆仓库、`bash bootstrap.sh`（它建 `.venv`、装 `.[dev]` 并离线自检；这个名字没有发到
+PyPI，所以不要 `pip install pickvedio-core`），并让它读
 `skills/video-summary/SKILL.md` 当作业指导书。这条退路只依赖终端和 pip，不依赖任何 skill
 加载机制。 The documented fallback needs no skill loader at all: a terminal, `pip`, and the
 `SKILL.md` read as instructions.

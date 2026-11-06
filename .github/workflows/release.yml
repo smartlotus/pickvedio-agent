@@ -4,7 +4,10 @@ name: Release
 #   1. builds an sdist + wheel,
 #   2. attaches them to a GitHub Release, together with a zip of the Muse skill
 #      pack so a non-Python user can install the skill without touching pip,
-#   3. publishes the distribution to PyPI through trusted publishing (no token).
+#   3. publishes the distribution to PyPI -- only if the repository variable
+#      PYPI_PUBLISH is `true` (see the pypi job). A tag with that variable unset
+#      produces a GitHub Release and nothing else, which is the shipped state:
+#      every documented install path uses this repository's git URL, not PyPI.
 
 on:
   push:
@@ -142,28 +145,30 @@ jobs:
     name: Publish to PyPI (trusted publishing)
     needs: build
     runs-on: ubuntu-latest
-    # MAINTAINER ACTION REQUIRED BEFORE THIS JOB CAN PASS:
-    #   PyPI -> your project "pickvedio-core" -> Publishing -> Trusted publishing:
-    #     Repository name: pickvedio-agent     (owner: smartlotus)
-    #     Workflow name:     release.yml       (this file)
-    #     Environment:       pypi              (must match `environment` below)
-    #     Distribution:      wheel AND sdist   (add both, or only one kind uploads)
-    #   Also create the matching GitHub environment named `pypi` in
-    #   Settings -> Environments, and leave its deployment protection rules empty
-    #   unless you want manual approval before every publish.
+    # TWO things must be true before this job can pass, and neither is a code
+    # change, so the default state is "skipped", not "failing":
+    #   1. set the repository variable PYPI_PUBLISH to `true`
+    #        gh variable set PYPI_PUBLISH --body true
+    #      (or Settings -> Secrets and variables -> Actions -> Variables).
+    #      Until you do, `v*` tags build and publish a GitHub Release only. That
+    #      is deliberate: this project's docs install from the git URL, so a
+    #      public repo works end to end without a PyPI account being wired up.
+    #   2. PyPI -> your project "pickvedio-core" -> Publishing -> Trusted publishing:
+    #        Repository name: pickvedio-agent     (owner: smartlotus)
+    #        Workflow name:     release.yml       (this file)
+    #        Environment:       pypi              (must match `environment` below)
+    #        Distribution:      wheel AND sdist   (add both, or only one kind uploads)
+    #      Also create the matching GitHub environment named `pypi` in
+    #      Settings -> Environments, and leave its deployment protection rules
+    #      empty unless you want manual approval before every publish.
     #   There is deliberately NO API token in repository secrets: a leaked
-    #   secret is permanent, a short-lived OIDC id-token is not. Until the
-    #   trusted publisher exists, this job fails with PyPI's
-    #   "the credential associated with user ... is not trusted" / 401 response.
-    #   That failure is the expected state, not a bug in this file.
-    #   Note the `if:` below: a manual workflow_dispatch run builds and can
-    #   publish a GitHub Release, but it does NOT push to PyPI, because a
-    #   dispatch ref is a branch, not a v* tag.
+    #   secret is permanent, a short-lived OIDC id-token is not. Publishing with
+    #   a token would also mean the key sits in a repo anyone can read events of.
     environment: pypi
     permissions:
       contents: read
       id-token: write # OIDC id token for PyPI trusted publishing; nothing else
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') && vars.PYPI_PUBLISH == 'true'
     steps:
       - name: Download dist
         uses: actions/download-artifact@v4

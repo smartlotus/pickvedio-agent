@@ -154,6 +154,103 @@ jobs:
           fi
           echo "checkout still clean after a real bootstrap run"
 
+  install:
+    name: Install (documented route)
+    # The agent-VM route starts with one pip command copied out of these docs.
+    # `pickvedio-core` is deliberately NOT published to PyPI, so a bare-name
+    # instruction is not a typo -- it is a dead end for whoever pastes it, and
+    # the failure looks like a bug in this tool. Two checks, both load-bearing:
+    # no command line may install the bare name, and the command that the docs
+    # do give has to work in a clean venv, outside the checkout.
+    runs-on: ubuntu-latest
+    needs: lint
+    env:
+      PVC_INSTALL_SPEC: pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: No documented command installs the unpublished PyPI name
+        run: |
+          python - <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          ROOT = Path(".")
+          SHIPPED = [
+              Path("README.md"), Path("AGENTS.md"),
+              *ROOT.glob("docs/*.md"),
+              *ROOT.glob("deploy/*.md"),
+              *ROOT.glob("skills/**/*.md"),
+          ]
+          # A line that *is* a shell command: optional prompt/`python -m`, then
+          # `pip install`. Comments (`# ...`) and prose mentions are allowed to
+          # name the bare package, because that is how we warn about it.
+          COMMAND = re.compile(r"^(?:\$ )?(?:python3(?:\.\d+)? -m )?pip install\b")
+          RESOLVES = ("git+https://github.com/smartlotus/pickvedio-agent", "-e ", ".[")
+
+          offenders = []
+          for path in SHIPPED:
+              if not path.is_file():
+                  continue
+              text = path.read_text(encoding="utf-8")
+              for number, line in enumerate(text.splitlines(), start=1):
+                  stripped = line.strip().removeprefix("$ ")
+                  if not COMMAND.match(stripped):
+                      continue
+                  if "pickvedio-core" not in stripped:
+                      continue
+                  if any(hint in stripped for hint in RESOLVES):
+                      continue
+                  offenders.append(f"{path}:{number}: {stripped}")
+
+          # The gate is only worth having if it can go red. Feed the forbidden
+          # shape through the same classifier and require exactly one hit.
+          probe = 'python3 -m pip install "pickvedio-core[service]"'
+          probe_hit = bool(COMMAND.match(probe.removeprefix("$ "))) and "pickvedio-core" in probe
+          probe_hit = probe_hit and not any(h in probe for h in RESOLVES)
+          if not probe_hit:
+              print("::error::the bare-name classifier no longer catches its own probe")
+              sys.exit(1)
+          print(f"negative control OK: {probe!r} is caught")
+
+          if offenders:
+              print("::error::install instructions that cannot resolve:")
+              for item in offenders:
+                  print("  ", item)
+              sys.exit(1)
+          print(f"{len(SHIPPED)} shipped docs checked, every pip command resolves")
+          PY
+
+      - name: Run the documented install in a clean venv
+        run: |
+          # `.venv-*` so .gitignore's `.venv*/` covers it: an env created inside
+          # a checkout must never be able to reach a commit.
+          python -m venv .venv-install
+          .venv-install/bin/python -m pip install --quiet --disable-pip-version-check \
+            "$PVC_INSTALL_SPEC"
+          .venv-install/bin/pvc --help > /dev/null
+          .venv-install/bin/pvc check | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert d['ok'], d
+          assert d['data']['network_used'] is False, d['data']
+          print('installed CLI works off-checkout:', d['code'])
+          "
+
+      - name: The install spec is the one the README gives
+        # Docs and CI may not drift: the string above must appear verbatim in
+        # the quick start, otherwise this job proves nothing about what a reader
+        # will actually copy.
+        run: |
+          grep -qF "$PVC_INSTALL_SPEC" README.md || {
+            echo "::error::README quick start no longer carries this exact requirement line"; exit 1; }
+          echo "README and CI agree on the install route"
+
   skill:
     name: Skill pack (Muse)
     runs-on: ubuntu-latest

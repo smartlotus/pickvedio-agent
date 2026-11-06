@@ -29,7 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from pickvedio_core import __version__
+from pickvedio_core import __version__, install_spec
 from pickvedio_core.config import Settings
 from pickvedio_core.errors import PickvedioError
 from pickvedio_core.jobs import JobStore
@@ -528,7 +528,8 @@ def cmd_serve(args) -> int:
         import uvicorn
     except ImportError:
         return emit(envelope(ok=False, code="dependency_missing",
-                             message="未安装服务依赖。", hint="pip install 'pickvedio-core[service]'"))
+                             message="未安装服务依赖。",
+                             hint=f'python3 -m pip install "{install_spec("service")}"'))
     from service.app import create_app
 
     uvicorn.run(create_app(settings), host=host, port=port)

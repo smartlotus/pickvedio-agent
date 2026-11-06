@@ -139,7 +139,9 @@ Honest list, because each one changes how the agent must behave:
 ## 6. Agent-side configuration (the Muse VM, not the service)
 
 ```bash
-python3 -m pip install --user pickvedio-core   # or: pip install -e . from a clone
+# pickvedio-core is not on PyPI; install it from this repository.
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.0"
+# or, from a clone: bash bootstrap.sh   (creates ./.venv and self-tests it)
 cat > ~/.pvc.env <<'ENV'
 export PVC_SERVICE_URL="https://<hostname>"
 export PVC_API_TOKEN="<inbound token>"

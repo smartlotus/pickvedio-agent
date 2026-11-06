@@ -36,6 +36,21 @@ from .urls import classify, extract_video_urls, validate_video_url
 
 __version__ = "1.0.0"
 
+REPO_URL = "https://github.com/smartlotus/pickvedio-agent"
+
+
+def install_spec(extra: str | None = None) -> str:
+    """Return the pip requirement line that resolves today.
+
+    The distribution is not published to PyPI, so a hint like
+    ``pip install pickvedio-core`` sends an agent into "No matching distribution
+    found" and it reads that as a bug in this tool. Everything that tells a
+    machine how to install this package goes through here, so the pin cannot
+    drift from ``__version__``.
+    """
+    name = f"pickvedio-core[{extra}]" if extra else "pickvedio-core"
+    return f'{name} @ git+{REPO_URL}@v{__version__}'
+
 __all__ = [
     "__version__",
     "ASRSettings",
@@ -47,6 +62,7 @@ __all__ = [
     "LLMSettings",
     "PickvedioError",
     "PROFILE_LABELS",
+    "REPO_URL",
     "RateLimited",
     "Report",
     "Segment",
@@ -60,6 +76,7 @@ __all__ = [
     "UpstreamModelError",
     "classify",
     "extract_video_urls",
+    "install_spec",
     "load_prompts",
     "validate_video_url",
 ]
