@@ -134,6 +134,7 @@ Both were real, and both were invisible on the author's machine:
 | --- | --- |
 | `service/` 在仓库根目录，不属于安装的包 → 安装后 `import service.app` 失败，`uvicorn service.app:app` 与 `pvc serve` 在真实主机上会崩 | 本机 pytest 与 `pvc serve` 的 cwd 就是仓库根，旁边正好有个 `service/` 目录;而 CI 里那句 `python -c "import service.app"` 同样在仓库根运行,所以它绿着发布了一个假的部署承诺 |
 | `pvc push --transcript '<内联 JSON>'` 在 Linux 上抛 `OSError(ENAMETOOLONG)` | 代码用 `Path(整段文本).is_file()` 判断"这是不是文件路径";Windows 对超长路径返回 False,Linux 的 `stat()` 直接抛错。长度也刚好只在 CI 的 fixture 规模上越界 |
+| `pvc --service URL status`（全局写法）悄悄丢掉 URL，`pvc --format md summarize …` 直接报错 | `--service/--token/--format` 同时声明在根解析器和子命令上时，子命令的默认值会覆盖根已经吃到的值；只声明在子命令上则子命令之前的写法被拒绝。本机手测都用的是"后置"写法，所以没暴露 |
 | 没有 `HOME`/`USERPROFILE` 的容器里，服务在 import 阶段就 `RuntimeError: Could not determine home directory` 崩掉 | 可选的桌面版种子配置文件用了裸的 `Path.home()`。本机的 `Settings.load()` 永远能找到家目录，所以这条路径只在真实启动服务时才暴露——它是被一次本地端到端演示抓到的，不是被测试抓到的 |
 
 修复与门禁 / fixes and gates:
@@ -148,6 +149,14 @@ Both were real, and both were invisible on the author's machine:
 - 家目录查不到时改为返回 `None` 并跳过可选种子（`_desktop_seed_path`）；对应的
   `test_settings_load_survives_a_home_directory_that_cannot_be_resolved` 带**负对照**：
   已单独验证该探针环境里 `Path.home()` 确实抛 `RuntimeError`，否则这条测试只是空转。
+- 重复声明的全局开关改用 `argparse.SUPPRESS` 作为子命令侧默认值，并新增
+  `test_flags_before_the_subcommand_are_not_clobbered_by_its_defaults` 同时测前/后置两种写法。
+
+一点测试基础设施的诚实说明 / one caveat about the harness: 这套测试会起**真实**的 localhost
+服务（这是刻意的，见上表），所以同一个工作副本上不要并发跑两遍 pytest——第二次会因为本机
+socket 压力随机报错（WinError 10055）。串行跑 114 项全绿。
+The suite binds real localhost sockets on purpose, so two concurrent pytest runs against the
+same checkout fail sporadically under this machine's socket pressure. Serial: 114 passed.
 
 What the suite actually exercises, and how far:
 

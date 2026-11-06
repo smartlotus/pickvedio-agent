@@ -517,6 +517,33 @@ def test_settings_load_survives_a_home_directory_that_cannot_be_resolved(tmp_pat
 
 
 
+def test_flags_before_the_subcommand_are_not_clobbered_by_its_defaults(service_server):
+    """``pvc --service X status`` and ``pvc status --service X`` must agree.
+
+    Both forms are documented. argparse lets a subparser's own default
+    overwrite a value already consumed from the root parser, so the first form
+    silently dropped the URL and ``status`` reported no service at all -- which
+    is what a live end-to-end run caught before any test did.
+    """
+    for argv in (
+        ["--service", service_server.base_url, "status"],
+        ["status", "--service", service_server.base_url],
+    ):
+        document = run_cli(argv)
+        assert document["ok"] is True, document
+        service = document["data"].get("service")
+        assert service is not None, argv
+        assert service["reachable"] is True, service
+        assert service["url"] == service_server.base_url
+
+    # --format has the same duplication; the local render path must still work.
+    parsed = __import__("pvc.cli", fromlist=["build_parser"]).build_parser().parse_args(
+        ["--format", "md", "summarize", RELAY_URL]
+    )
+    assert parsed.format == "md"
+
+
+
 def _minimal_report():
     from pickvedio_core.models import Report, SourceKind
 

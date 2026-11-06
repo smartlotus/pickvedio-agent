@@ -602,6 +602,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--allow-unknown-platform", action="store_true")
     parser.add_argument("--service", default="", help="改用已部署的服务（等价 PVC_SERVICE_URL）")
     parser.add_argument("--token", default="", help="服务入站令牌（等价 PVC_API_TOKEN，不要把值写进日志）")
+    # Also declared on the subcommands that produce a report, with SUPPRESS, so
+    # either `pvc --format md summarize …` or `pvc summarize … --format md`
+    # works. A flag only the root declares would be rejected after the
+    # subcommand; one only the subparser declares gets clobbered before it.
+    parser.add_argument("--format", choices=["json", "md", "text", "chat"], default="json")
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -613,12 +618,13 @@ def build_parser() -> argparse.ArgumentParser:
         ``pvc status --service URL``, so the root-level flags alone would make
         the docs a lie.
         """
-        target.add_argument("--service", default="", help="改用已部署的服务（等价 PVC_SERVICE_URL）")
-        target.add_argument("--token", default="", help="服务入站令牌")
+        target.add_argument("--service", default=argparse.SUPPRESS,
+                            help="改用已部署的服务（等价 PVC_SERVICE_URL）")
+        target.add_argument("--token", default=argparse.SUPPRESS, help="服务入站令牌")
 
     def add_format(target: argparse.ArgumentParser) -> None:
         target.add_argument(
-            "--format", choices=["json", "md", "text", "chat"], default="json",
+            "--format", choices=["json", "md", "text", "chat"], default=argparse.SUPPRESS,
             help="json 为默认且唯一稳定的机器接口；其余把渲染后的报告写到 stderr",
         )
 
