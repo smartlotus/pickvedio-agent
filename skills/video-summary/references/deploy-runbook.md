@@ -77,11 +77,14 @@ Do these in order, and show me the raw command and the raw output of every step:
     Then verify the extractor was copied whole -- not optional:
     `sha256sum skills/video-summary/assets/browser-extract.js /opt/hatch/skills/video-summary/assets/browser-extract.js`
     The two hashes must match. If they do not, delete the copied directory, re-copy
-    skills/video-summary/, and paste me both hash lines. Measured reason: cutting the
-    last 209 bytes off this .js still leaves node --check at rc=0, because the cut
-    lands inside a block comment, and a truncated extractor returns a bogus reason --
-    or nothing -- from the page, which would make me tell you the video has no
-    subtitles when the copy is what is broken.
+    skills/video-summary/, and paste me both hash lines. Measured reason: deleting the
+    last 209 bytes of this .js -- which removes the entire trailing
+    pickvedioExtract({}).then(...) call, the statement that actually runs the
+    extraction and fills window.__pvcRelay -- still leaves `node --check` at rc=0, and
+    so does deleting 120 bytes. Such a copy parses, evaluates, and then silently
+    extracts nothing: __pvcRelay stays undefined, and I would tell you the video has no
+    subtitles when what is broken is the copy. Cutting 20 or 60 bytes does fail the
+    check, so it is a clean statement boundary that slips through, not a comment.
     If this machine's
    skill directory is not /opt/hatch/skills, follow whatever the machine actually
    uses and paste `ls /opt/hatch/skills | head` -- do not invent a third path.
@@ -227,10 +230,10 @@ Honest list, because each one changes how the agent must behave:
 
 ```bash
 # pickvedio-core is not on PyPI; install it from this repository.
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.18"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.19"
 # or, from a clone: bash bootstrap.sh   (creates ./.venv and self-tests it)
 # or, with no git on the machine: the wheel attached to the tag (anonymous GET)
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.18/pickvedio_core-1.0.18-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.19/pickvedio_core-1.0.19-py3-none-any.whl"
 cat > ~/.pvc.env <<'ENV'
 export PVC_SERVICE_URL="https://<hostname>"
 export PVC_API_TOKEN="<inbound token>"

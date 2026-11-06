@@ -71,7 +71,10 @@ https://github.com/smartlotus/pickvedio-agent
      /opt/hatch/skills/video-summary/assets/browser-extract.js
    两行哈希必须相同。不相同就把整个 skills/video-summary/ 删掉重拷，并把两行哈希
    都贴给我。理由：这份 .js 是被截断时语法检查照样能过的（实测：砍掉尾部 200 多字节，
-   node --check 仍然 rc=0，因为切口落在注释里），而截断的抽取器会在页面上返回一个
+   node --check 仍然 rc=0，而且实测过：把结尾那行自动执行的 pickvedioExtract({}).then(...)（尾部 209 字节）整段删掉，
+   node --check 仍是 rc=0——这种拷贝语法过关、能求值，却压根不会执行抽取，
+   window.__pvcRelay 一直是 undefined；砍 20 或 60 字节倒是会报错，所以漏网的是
+   整条语句边界而不是注释），而截断的抽取器会在页面上返回一个
    假的 reason 或干脆空着——那时我会告诉你"这视频没字幕"，其实是拷贝坏了。
    如果你这台机的技能目录不是 /opt/hatch/skills，就照本机已有技能的实际写法来，
    并把 `ls /opt/hatch/skills | head` 的输出贴给我，不要猜第三个路径。
@@ -192,7 +195,7 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
 ```bash
 curl -fsS "https://<域名>/healthz"                      # -> 200，免令牌
 curl -fsS "https://<域名>/v1/profiles" -H "Authorization: Bearer $PVC_API_TOKEN"
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.18"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.19"
                                                          # 这个名字不在 PyPI 上，必须带 git+ 地址；
                                                          # clone 过的话用 bash bootstrap.sh 更省事
 export PVC_SERVICE_URL="https://<域名>"
