@@ -27,6 +27,14 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # The tag name, however this run was started: a `v*` push carries it in
+  # github.ref_name, a manual run carries it in the `tag` input. Every job below
+  # uses this instead of GITHUB_REF_NAME, because on a workflow_dispatch run
+  # GITHUB_REF_NAME is the *branch* (main) -- which once would have created a
+  # GitHub Release named "main" pointing at branch head.
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
 jobs:
   build:
     name: Build sdist, wheel and skill pack
@@ -78,7 +86,7 @@ jobs:
           import yaml
 
           skill = pathlib.Path("skills/video-summary")
-          version = os.environ.get("GITHUB_REF_NAME", "dev").lstrip("v") or "dev"
+          version = (os.environ.get("RELEASE_TAG") or "dev").lstrip("v") or "dev"
           out = pathlib.Path("dist") / f"video-summary-skill-{version}.zip"
           out.parent.mkdir(parents=True, exist_ok=True)
 
@@ -100,7 +108,7 @@ jobs:
                   zf.write(path, path.relative_to(skill.parent).as_posix())
           print("wrote", out)
           PY
-          unzip -l "dist/video-summary-skill-${GITHUB_REF_NAME#v}.zip"
+          unzip -l "dist/video-summary-skill-${RELEASE_TAG#v}.zip"
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
@@ -125,21 +133,29 @@ jobs:
           path: dist
 
       - name: Create the release and attach every artifact
-        # `gh` is preinstalled on the runner; GITHUB_TOKEN supplies auth. No
-        # third-party release action, so the permission surface stays exactly
-        # `contents: write`.
+        # This job has no checkout on purpose (it only needs the artifacts), so
+        # every `gh` call must name the repository: without `-R` gh shells out
+        # to git to discover it and dies with "failed to run git: fatal: not a
+        # git repository". That is how the first real tag push failed.
+        # `--target` is the tag, not GITHUB_SHA: on a workflow_dispatch run the
+        # SHA is branch head, which would hang the release off the wrong commit.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="${GITHUB_REF_NAME}"
-          if ! gh release view "$TAG" > /dev/null 2>&1; then
+          TAG="$RELEASE_TAG"
+          if ! gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release create "$TAG" \
-              --target "${GITHUB_SHA}" \
+              -R "$GITHUB_REPOSITORY" \
+              --target "$TAG" \
               --title "pickvedio-core $TAG" \
               --generate-notes
           fi
           # Release assets: the Python distribution AND the skill zip.
-          gh release upload "$TAG" dist/* --clobber
+          gh release upload "$TAG" dist/* -R "$GITHUB_REPOSITORY" --clobber
+          # Assert the release is what a reader will find, not just that the
+          # upload command returned 0.
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json tagName,targetCommitish,assets \
+            --jq '{tag:.tagName, target:.targetCommitish, assets:[.assets[].name]}'
 
   pypi:
     name: Publish to PyPI (trusted publishing)

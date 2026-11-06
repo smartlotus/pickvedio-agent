@@ -290,6 +290,24 @@ Would install pickvedio-core-1.0.0
   pypi job 必红，因为 trusted publishing 还没配"，那会让一次正常发布看起来像失败发布；
   默认跳过、配好变量后一键启用，才是诚实的默认态。
 
+## 5e. 第一次真推 tag 抓到的两个发布缺陷 / the first real tag push
+
+v1.0.0 之前从未被推过，所以 `release.yml` 里两条路径都只是"看起来对"。真推之后：
+
+- `Publish the GitHub Release` 直接红：`failed to run git: fatal: not a git repository`。
+  那个 job 故意不做 checkout（它只需要 artifact），而 `gh` 在没有仓库上下文时会去调
+  git 来推断仓库。**修法**：三处 `gh` 都显式 `-R "$GITHUB_REPOSITORY"`，并在上传后用
+  `gh release view --json ... --jq` 把 tag/target/assets 念出来——只断言"上传命令返回 0"
+  不足以说明读者真能找到一个完整 release。
+- `--target "$GITHUB_SHA"` 在 `workflow_dispatch` 路径上是**分支头**而不是 tag 的提交；
+  而 `GITHUB_REF_NAME` 在 dispatch 时等于 `main`，也就是说手动重发一次会造出一个名叫
+  "main" 的 release 并挂在错误的提交上。**修法**：workflow 级 `env.RELEASE_TAG`
+  = `inputs.tag || github.ref_name`，tag 推送与手动重发共用同一个值；`--target` 用 tag
+  本身（GitHub 接受 tag 名作为 target）。
+
+`Publish to PyPI` 在这次真推里是 `skipped`（预期的默认态，因为 `PYPI_PUBLISH` 未设置），
+不再是"每次发布必红一格"。
+
 ## 6. 尚未验证 / still to verify after deployment
 
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
