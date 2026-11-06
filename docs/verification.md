@@ -538,6 +538,30 @@ git 依赖时，在**全新 clone** 里 `git checkout v1.0.2` 被 "docs/verifica
 `pvc push … --style brief` 之后 `pvc job wait --id <job_id>`。
 本地复验：ruff 干净，130 项测试 0 失败。
 
+## 5k. 一次"CI 全绿"是怎么把修好的东西撤回去的
+
+`dea74df`（只该改一段文档）把 `sources/ladder.py` 的 hint 修复和
+`tests/test_service_pipeline.py` 里的门禁**一起撤掉了**，CI 还是全绿。原因链是：
+`git rebase --autostash` 失败后把改动留在 stash 里、默认 index 停在旧 blob 上；
+我随后 `git add <一个文件> && git commit` 用的是那个**旧 index 的整体**，
+于是这一笔把别人的旧内容也提交了。而唯一会喊"hint 又变回去了"的那个测试，
+恰好和 hint 一起被撤回——门禁和它保护的东西死在同一笔提交里，
+所以"CI 绿"这件事在那一刻毫无信息量。
+
+发现方式不是看 CI，是把**远端 blob** 拉下来数：
+`gh api repos/.../contents/src/pickvedio_core/sources/ladder.py?ref=<remote sha>`
+里 `--transcript relay.json --summarize` 的出现次数（当时是 1，正确应为 0），
+以及测试文件里 `invents_a_pvc_flag` 是否存在（当时 0）。
+
+因此加了第二道、位置不同的闸：`Lint (ruff)` 作业里直接 grep 随包指令，
+出现那条不存在的命令形状就红（`docs/verification.md` 白名单，因为它按设计要引用坏例子；
+同一步还要求"对白名单文件本身必须能 grep 到"，防白名单吞掉检测）。
+工作流文件不参与修复本身，所以撤修复带不走这道闸。
+
+现在每次推送后都按远端 sha 复核内容，不再以本地 `git status` 干净为准
+（1b0fb71 的复核结果：bogus hint 0 次、门禁存在）。1.0.3 就是为了让**已发布附件**
+里的运行期 hint 也变成修正后的——1.0.2 的 wheel 里那条错话还在。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
