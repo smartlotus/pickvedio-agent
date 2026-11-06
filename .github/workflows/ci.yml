@@ -154,6 +154,30 @@ jobs:
           fi
           echo "checkout still clean after a real bootstrap run"
 
+      - name: Bootstrap on a Debian-style VM without python3-venv
+        # The Muse/agent VM is a distro image, and Ubuntu/Debian ship python3
+        # with ensurepip in a separate package, so `python3 -m venv` fails at the
+        # very first step of the recommended route with a message that looks like
+        # a bug in this repo. bootstrap.sh falls back to --without-pip +
+        # get-pip.py; this job is the only place that fallback is real-tested.
+        # The fixture asserts its own brokenness first: if ensurepip imports, the
+        # container is not the failing case and the run proves nothing.
+        run: |
+          docker run --rm -v "$PWD:/repo" ubuntu:24.04 bash -euo pipefail -c '
+            apt-get update -qq > /dev/null
+            apt-get install -y -qq --no-install-recommends python3 curl ca-certificates tar > /dev/null
+            python3 -V
+            if python3 -c "import ensurepip" 2>/dev/null; then
+              echo "::error::fixture is not the broken case (ensurepip importable)"
+              exit 1
+            fi
+            echo "fixture confirmed: python3 present, ensurepip missing"
+            mkdir -p /work && tar -C /repo --exclude=.git --exclude=.venv -cf - . | tar -C /work -xf -
+            cd /work
+            bash bootstrap.sh 2>&1 | tail -n 20
+            test -x /work/.venv/bin/pvc
+            /work/.venv/bin/pvc check > /dev/null && echo "debian-style bootstrap OK"
+          '
   install:
     name: Install (documented route)
     # The agent-VM route starts with one pip command copied out of these docs.

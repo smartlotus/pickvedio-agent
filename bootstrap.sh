@@ -60,12 +60,40 @@ fi
 
 echo "==> interpreter: $("$PYTHON_BIN" -V 2>&1) at $(command -v "$PYTHON_BIN")"
 echo "==> environment: $VENV"
-
-if [ ! -x "$VENV/bin/python" ] && [ ! -x "$VENV/Scripts/python.exe" ]; then
-  "$PYTHON_BIN" -m venv "$VENV"
-fi
 VENV_PY="$VENV/bin/python"
 [ -x "$VENV_PY" ] || VENV_PY="$VENV/Scripts/python.exe"
+
+if [ ! -x "$VENV_PY" ]; then
+  if venv_error="$("$PYTHON_BIN" -m venv "$VENV" 2>&1)"; then
+    :
+  else
+    # Debian and Ubuntu ship python3 without ensurepip (it lives in the
+    # python3-venv package), so the very first command an agent runs in a cloud
+    # VM dies with a message about pip being unavailable, which reads like a bug
+    # in this repo and is not. Fall back to a venv without pip and install pip
+    # from PyPA's own bootstrap script.
+    echo "    plain 'python3 -m venv' failed: ${venv_error:0:300}" >&2
+    echo "==> retrying: venv --without-pip, then get-pip.py"
+    "$PYTHON_BIN" -m venv --without-pip "$VENV"
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$VENV/get-pip.py"
+    else
+      "$PYTHON_BIN" -c 'import urllib.request,sys; urllib.request.urlretrieve("https://bootstrap.pypa.io/get-pip.py", sys.argv[1])' "$VENV/get-pip.py"
+    fi
+    if [ ! -s "$VENV/get-pip.py" ]; then
+      echo "verdict: FAILED -- no pip in this python and get-pip.py could not be fetched." >&2
+      echo "                Fix: apt-get install -y python3-venv python3-pip, then re-run bash bootstrap.sh" >&2
+      exit 1
+    fi
+    "$VENV_PY" "$VENV/get-pip.py" --quiet --disable-pip-version-check || {
+      echo "verdict: FAILED -- get-pip.py ran but pip is still missing in $VENV." >&2
+      echo "                Fix: apt-get install -y python3-venv, then re-run bash bootstrap.sh" >&2
+      exit 1
+    }
+    rm -f "$VENV/get-pip.py"
+    echo "    pip bootstrapped into $VENV"
+  fi
+fi
 
 echo "==> installing .[$EXTRAS]"
 "$VENV_PY" -m pip install --quiet --disable-pip-version-check --upgrade pip
