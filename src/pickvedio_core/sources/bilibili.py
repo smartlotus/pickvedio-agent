@@ -56,6 +56,25 @@ _RELAY_HINT = (
 )
 
 
+def absolute_subtitle_url(url: str) -> str:
+    """Turn whatever form Bilibili put in `subtitle_url` into a fetchable URL.
+
+    Three shapes have been observed: protocol-relative (`//`-prefixed),
+    root-relative (`/x/player/v2subtitle?...`, which crashed httpx with
+    "unknown url type" the first time a real payload used it), and absolute.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith("//"):
+        return "https:" + raw
+    if raw.startswith("/"):
+        return API + raw
+    if raw.startswith("http://") or raw.startswith("https://"):
+        return raw
+    return API + "/" + raw.lstrip("./")
+
+
 @dataclass(slots=True)
 class BilibiliVideo:
     bvid: str
@@ -167,15 +186,12 @@ class BilibiliClient:
             data = payload.get("data") or {}
             rows = ((data.get("subtitle") or {}).get("subtitles")) or []
             for row in rows:
-                url = row.get("subtitle_url") or ""
-                if url.startswith("//"):
-                    url = "https:" + url
                 tracks.append(
                     {
                         "lan": row.get("lan") or "",
                         "lan_doc": row.get("lan_doc") or "",
                         "ai_type": int(row.get("ai_type") or 0),
-                        "url": url,
+                        "url": absolute_subtitle_url(row.get("subtitle_url") or ""),
                         "endpoint": endpoint,
                     }
                 )
@@ -186,7 +202,7 @@ class BilibiliClient:
         return tracks
 
     def fetch_track(self, track: dict[str, Any]) -> list[Segment]:
-        url = track.get("url") or ""
+        url = absolute_subtitle_url(str(track.get("url") or ""))
         if not url:
             return []
         response = self.client.get(url)

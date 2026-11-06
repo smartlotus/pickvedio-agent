@@ -132,6 +132,18 @@ class Report:
     def chars(self) -> int:
         return sum(len(item.text) for item in self.segments)
 
+    @property
+    def transcript_source_label(self) -> str:
+        """Chinese provenance string, for report headers and chat replies.
+
+        Kept next to ``source`` rather than only inside the JSON payload because
+        every front end has to state the same thing and disagreeing labels are
+        how a reader trusts the wrong tier.
+        """
+        from .report_labels import SOURCE_LABELS
+
+        return SOURCE_LABELS.get(self.source, "未知来源")
+
     def as_dict(self, *, include_segments: bool = True) -> dict[str, Any]:
         data: dict[str, Any] = {
             "job_id": self.job_id,

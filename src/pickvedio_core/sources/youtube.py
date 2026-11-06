@@ -106,7 +106,10 @@ class YoutubeClient:
     def _rank(self, tracks: list[CaptionTrack]) -> list[CaptionTrack]:
         def score(track: CaptionTrack) -> tuple[int, int, int]:
             language = (track.language or "").lower()
-            manual = 0 if track.generated else 1
+            # 0 first, so a creator-authored track always beats the platform's
+            # automatic speech recognition: ASR mishears names and numbers, and
+            # a summary inherits that silently.
+            manual = 0 if not track.generated else 1
             preference = len(self.preferred)
             for index, wanted in enumerate(self.preferred):
                 if language.startswith(wanted.lower()):
@@ -258,7 +261,19 @@ class YoutubeClient:
                 platform="youtube",
             )
         for track in tracks:
-            segments = track.segments or []
+            segments = track.segments
+            if segments is None and track.url:
+                # A listed track can arrive without a body (the caller only had
+                # the manifest). Fetching here keeps `transcript()` correct for
+                # any track source, instead of silently reporting "too short"
+                # for a caption track it never tried to read.
+                try:
+                    segments = self.fetch(track)
+                    track.segments = segments
+                except (TransientNetworkError, PickvedioError) as exc:
+                    logger.info("caption fetch skipped %s: %s", track.language, exc)
+                    continue
+            segments = segments or []
             if len(segments) < 3:
                 continue
             duration = segments[-1].end if segments else None

@@ -228,6 +228,25 @@ OpenAI 兼容桩（本会话没有可用的付费 key）。
 [7] pvc --service <url> status -> ok=true, service.reachable=true
 ```
 
+## 5c. 真浏览器验证与"正对照"补测抓到的三个真缺陷
+
+用 Playwright 的真实 Chromium 访问真实页面（ logged-out ），并补写以真实响应结构为输入的
+正对照测试之后，发现并修掉了三个**只有真环境才会暴露**的问题：
+
+| 缺陷 | 症状 | 为什么会到生产才炸 |
+| --- | --- | --- |
+| B 站 `subtitle_url` 是根相对路径（`/x/player/v2subtitle?…`） | `ValueError: unknown url type`，取字幕直接抛异常 | 代码只处理了 `//` 前缀的形式。我第一次的真浏览器样本里三种形式都出现了 |
+| YouTube 轨道排序写反：`manual = 0 if track.generated else 1` | **自动字幕永远排在人工字幕前面**，总结静默继承 ASR 的听错 | 只有同时存在两种轨道时才看得出，而本机一条正文都拿不到 |
+| `YoutubeClient.transcript()` 只吃已经填好 `segments` 的轨道 | 拿到"清单但没正文"的轨道时报"内容过短"，其实根本没去 fetch | `tracks()` 内部会顺手 fetch，掩盖了这条路径的脆弱 |
+
+同时把来源标签收敛成单一出处（`report_labels.py` + `Report.transcript_source_label`），
+避免 JSON、Markdown、聊天短版三处说法不一致。
+
+**这些测试证明了"当平台真的下发字幕时整条链路是对的"**（分块 → 逐块提示 → 是否压缩的判定 →
+合成 → 六种渲染 → 落盘），但**仍然没有证明真平台会下发**。logged-out 真浏览器的实测结果是：
+B 站页面自己的 `player/v2` 请求也拿到空列表（这是关键对照：排除了"我请求写法错了"），
+YouTube 列出了 6 条轨道但每一次正文请求（包括页面自己的）都返回 0 字节。
+
 ## 6. 尚未验证 / still to verify after deployment
 
 - A real Railway (or other) deploy answering `/healthz` over the public internet.

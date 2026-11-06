@@ -124,20 +124,26 @@ jobs:
           python-version: "3.12"
       - name: Run bootstrap.sh from a fresh clone
         run: |
-          bash bootstrap.sh
+          bash bootstrap.sh | tee bootstrap-log.txt
+          grep -q "verdict: READY" bootstrap-log.txt
           test -x .venv/bin/pvc
-          .venv/bin/pvc profiles | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['ok'] and any(p['profile']=='brief' for p in d['data']['profiles']); print('bootstrap CLI OK')"
-      - name: Fail if bootstrap reported a non-ready verdict
+          .venv/bin/pvc profiles | python3 -c "
+          import json,sys
+          d = json.load(sys.stdin)
+          assert d['ok'] and any(p['profile'] == 'brief' for p in d['data']['profiles'])
+          print('bootstrap CLI OK')
+          "
+      - name: Keep the bootstrap reports out of git
+        # They hold this runner's paths. Assert git ignores them -- do NOT
+        # `git add -f` to look for them, which would stage exactly the files
+        # this step is supposed to catch.
         run: |
-          grep -q "verdict: READY" <(bash bootstrap.sh 2>&1) || {
-            echo "bootstrap.sh did not reach READY"; exit 1; }
-      - name: Guard against committing the bootstrap reports
-        run: |
-          git add -A -f
-          if git diff --cached --name-only | grep -E '^\.bootstrap-(check|status)\.json$'; then
-            echo "bootstrap reports must stay ignored"; exit 1
-          fi
-          git reset -q
+          touch .bootstrap-check.json .bootstrap-status.json
+          for f in .bootstrap-check.json .bootstrap-status.json; do
+            git check-ignore -q "$f" || { echo "$f must be in .gitignore"; exit 1; }
+          done
+          git status --porcelain | grep -E '^\?\? ' && {
+            echo "unexpected untracked files after bootstrap"; exit 1; } || true
 
   skill:
     name: Skill pack (Muse)
