@@ -106,7 +106,7 @@ def summarize_transcript(
         segments=plan,
         model=str(model or ""),
         stage_seconds=dict(summarizer.timings),
-        usage={**usage.as_dict(), **{f"chunk_{k}": v for k, v in estimate_calls(len(chunks)).items()}},
+        usage={**usage.as_dict(), **estimate_calls(len(chunks))},
     )
     return report, prompt_set, usage
 

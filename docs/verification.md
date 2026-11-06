@@ -210,6 +210,24 @@ on an unauthenticated session no transcript exists to obtain, and inventing one
 is the failure mode this design is built to prevent. The success path for a
 logged-in session is section 4's relay test plus the still-unsigned-off item 2.
 
+## 5b. 一次真实的 HTTP 往返 / one real HTTP exchange
+
+本机用真实 uvicorn 监听端口 + 真实 FastAPI 应用跑通；只有总结模型是 localhost 上的
+OpenAI 兼容桩（本会话没有可用的付费 key）。
+
+```
+[3] GET /healthz -> 200 {"ok":true,"auth_required":true,"llm_configured":true,
+                         "asr_configured":false,"workers":2,"inbound_token_missing":false}
+[4] POST /v1/jobs 无 token -> 401 {"code":"unauthorized","message":"缺少或错误的 Authorization Bearer 令牌。"}
+[5] POST /v1/transcripts（30 段、1540 字、声明 up_subtitles）-> 200 任务已开始
+[6] GET /v1/jobs/<id> -> completed；GET /v1/jobs/<id>/report ->
+    transcript_source=up_subtitles segments=30 chars=1540
+    usage={"llm_calls":2,"prompt_tokens":894,"completion_tokens":120,
+           "chunk_calls":1,"reduce_calls":0,"final_calls":1,"total":2}
+    渲染出 report_markdown / report_text / chat_message
+[7] pvc --service <url> status -> ok=true, service.reachable=true
+```
+
 ## 6. 尚未验证 / still to verify after deployment
 
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
