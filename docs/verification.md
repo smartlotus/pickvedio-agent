@@ -494,6 +494,17 @@ HEAD 构建结果一致，不重切。但"应该一致"不是证据，发布之�
 dependabot 的 actions 升级 PR（#1）rebase 到 4060e12 之后，继承了同一个红 job；
 让它再 rebase 到 b6ce80a 上重跑，等绿再合，不盲并。
 
+这一节自己又当场添了一笔：它第一次落库没走 git，走了 Contents API——当时
+github.com:443 从写作者的机器上不可达，而 api.github.com 可达（提交信息里有括注）。
+API 直传磁盘原始字节，绕过 clean filter，blob 里带进了 505 个 CRLF；而
+`.gitattributes` 对 `*.md` 钉死 `eol=lf`，且文件开头自称 load-bearing。后果精确命中
+CI 里唯一会跨 commit checkout 的 job：`Install (documented route)` 用 pip 装这个
+git 依赖时，在**全新 clone** 里 `git checkout v1.0.2` 被 "docs/verification.md 有
+本地改动" 拒绝（run 42249523515）——全新 clone 不可能有本地改动，可能的只有磁盘
+字节与过滤器约定不一致。修复即本提交：重传 LF 归一后的字节。教训并入同一条：
+**绕过 git 的写入路径，同时绕过了 git 替你守住的字节约定**；上一条里"修类不修拼写"
+的原则，在这里的对应形态是"写入必须走会被过滤器看见的路"。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
