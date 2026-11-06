@@ -27,14 +27,20 @@ on:
 #   id-token:  write -> only the PyPI job (OIDC trusted publishing)
 # No secrets are read here at all; there is deliberately no API token.
 #
-# Honest caveat, measured on the first real v1.0.0 tag: even with this block the
-# release job got `HTTP 403: Resource not accessible by integration`, and
-# `GET /repos/.../actions/permissions/workflow` answers
-# `default_workflow_permissions: read` for this repository. On this repo the
-# binding ceiling is that Settings value, not this YAML -- so publishing from CI
-# needs the one-time toggle spelled out in the release job's failure path. The
-# v1.0.0 release itself is real: its three assets come from the build job of
-# that same run and were created with an account token.
+# Measured history of the 403, because the shape of the rule matters here:
+#   - tag push of v1.0.0 with `contents: read` at this level and write only in
+#     the job -> HTTP 403 "Resource not accessible by integration" (jobs cannot
+#     exceed the workflow level, which is why the level above grants the max).
+#   - workflow_dispatch of that same tag with write granted at BOTH levels ->
+#     still 403, on POST /releases.
+#   - tag push of v1.0.1 with this exact file -> the release job succeeded and
+#     published all three assets by itself.
+# So the two 403s differ from the success by the workflow level (first case) and
+# by the event (second case). I did not establish why a manual run was refused
+# while a tag push is allowed, and I am not going to assert a cause I have not
+# measured; the failure path below prints both remedies rather than guessing one.
+# Publishing from your own account is a legitimate fallback, not a workaround:
+#   gh release create <tag> --target <commit> --generate-notes && gh release upload <tag> dist/* --clobber
 permissions:
   contents: write
   id-token: write
@@ -175,15 +181,13 @@ jobs:
               --title "pickvedio-core $TAG" \
               --generate-notes; then
               echo "::error::the workflow token was refused write access to releases"
-              echo "This repository reports default_workflow_permissions=read, and a v* run"
-              echo "here got HTTP 403 'Resource not accessible by integration' even with"
-              echo "'permissions: contents: write' in this file -- the ceiling is the"
-              echo "repository setting, not the YAML."
-              echo "Fix either way:"
+              echo "This same file publishes fine on a v* tag push (v1.0.1 did), so a"
+              echo "refusal here is about the token this run got, not about the YAML."
+              echo "Two ways forward, either is legitimate:"
               echo "  1. Settings -> Actions -> General -> Read and write permissions, or"
               echo "     gh api -X PUT repos/$GITHUB_REPOSITORY/actions/permissions/workflow \\"
               echo "        -f default_workflow_permissions=read-write -f can_approve_pull_request_reviews=false"
-              echo "  2. publish this tag from your own account instead:"
+              echo "  2. publish this tag from an account token instead:"
               echo "     gh release create $TAG --target $TARGET --generate-notes"
               echo "     gh release upload $TAG dist/* --clobber"
               exit 1

@@ -309,11 +309,12 @@ v1.0.0 之前从未被推过，所以 `release.yml` 里两条路径都只是"看
   commit SHA，不接受 tag 名。改成先 `gh api repos/<repo>/commits/<tag>` 把（带注释的）
   tag 解析成提交，再 `--target $TARGET`——这条在 tag 推送与手动重发两种事件下同形。
 - `Publish the GitHub Release` 即便把 `contents: write` 同时写在 workflow 级和 job 级，
-  仍然 `HTTP 403: Resource not accessible by integration`；而
-  `GET /repos/.../actions/permissions/workflow` 对这个仓库返回
-  `default_workflow_permissions: read`。也就是说**卡住的是仓库的 Actions 设置，不是 YAML**。
-  我没有替用户改这个设置（它会把该仓库所有工作流的默认令牌权限放大到可写），
-  而是把两种解法写进了失败分支：一次性打开 read-write，或用账号 token 发 release。
+  在 **workflow_dispatch** 触发的那次仍然 `HTTP 403`；当时我据此写成"卡住的是仓库的
+  Actions 设置"。**这句结论已被推翻**：v1.0.1 用同一份 `release.yml` 由 **tag 推送**触发，
+  `Publish the GitHub Release` 自己就成功了，三个附件也是它挂上去的。三次观测的差别是
+  "workflow 级 read 封顶"（第一次）与"事件是 dispatch 而非 tag push"（第二次），
+  我没能证实为什么手动运行被拒而 tag 推送不被拒，所以文档与 yml 里现在只列观测、不编因果，
+  失败分支同时给出两条出路（改默认权限 / 用账号 token 发），不再断言哪条是"真正的"原因。
 
 ### v1.0.0 实际发布出去了什么
 
@@ -404,6 +405,24 @@ v1.0.0 的三个附件是从 tag 提交 9b6cdf2 构建的，而 tag 之后 main 
 
 `verification.md` 上面 §5d–§5f 里那些 `v1.0.0` 字面量是**历史记录**，不跟着 bump 改，
 它们描述的就是当时那次发布。
+
+v1.0.1 的结果（不是计划，是已发生）：tag 推送触发的 Release 工作流自己把发布做完了
+（`Build sdist, wheel and skill pack` success、`Publish the GitHub Release` success、
+PyPI 按 `vars.PYPI_PUBLISH` 未设而 skipped）。把三个附件匿名下载回来逐一验过内容：
+
+```
+video-summary-skill-1.0.1.zip  35000 B  7 个条目
+  SKILL.md 里出现 "data.hint" 与 "short_link"      -> True / True
+  旧的误导性措辞 "read `code`, `message` and `hint`" -> 不存在
+  文内安装 pin                                      -> pickvedio-agent@v1.0.1
+pickvedio_core-1.0.1-py3-none-any.whl 102217 B
+  pickvedio_core/__init__.py 的 __version__          -> 1.0.1
+  config.py 里含 seed_speaks（seed 抢通道的那道闸）    -> True
+pickvedio_core-1.0.1.tar.gz 113582 B
+```
+
+也就是说"发布件教 agent 去读一个不存在的键"这个坑，现在是靠 zip 里的原文消除的，
+不是靠我在 README 里多说一句话。
 
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
