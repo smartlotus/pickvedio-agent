@@ -27,16 +27,13 @@ from typing import Any
 from pickvedio_core import __version__, install_spec
 from pickvedio_core.config import Settings
 from pickvedio_core.errors import (
-    AuthRequired,
     ConfigurationError,
     DependencyError,
     EmptyTranscript,
-    JobNotFound,
+    JobNotReady,
     PickvedioError,
-    RateLimited,
-    TransientNetworkError,
-    UpstreamBlocked,
-    UpstreamModelError,
+    ServiceNotConfigured,
+    Unauthorized,
 )
 from pickvedio_core.jobs import JobStore
 from pickvedio_core.pipeline import run as pipeline_run
@@ -54,31 +51,33 @@ DESCRIPTION = (
 
 # Each error class carries the status it should surface as, so a new error type
 # cannot silently degrade into a 500 with no information.
-_STATUS = {
-    ConfigurationError: 400,
-    AuthRequired: 401,
-    JobNotFound: 404,
-    DependencyError: 501,
-    RateLimited: 429,
-    EmptyTranscript: 422,
-    UpstreamBlocked: 424,
-    UpstreamModelError: 502,
-    TransientNetworkError: 502,
-    PickvedioError: 500,
-}
+# No status table here any more: every error class already declares its own
+# `http_status`, and keeping a second copy meant two things could drift. They
+# had -- `CancelledError` (499) and `ServiceNotConfigured` (503) were both
+# answered as whatever their nearest listed ancestor said, so a cancelled job
+# polled as 500 and a service with no token answered 400 instead of the
+# fail-closed 503 the docs promise.
+
 
 
 def status_for(exc: PickvedioError) -> int:
-    for cls, code in _STATUS.items():
-        if isinstance(exc, cls):
-            return code
-    return 500
+    """The status comes from the class itself; an unclassified bug is a 500.
+
+    There used to be a second table here mapping classes to statuses, and it had
+    already fallen out of sync with the classes: a cancelled job polled as 500
+    and a service with no `PVC_API_TOKEN` answered 400 instead of the fail-closed
+    503 the docs promise, because both matched a listed ancestor. One source of
+    truth, on the class.
+    """
+    return int(getattr(exc, "http_status", 500) or 500)
 
 
 def create_app(settings: Settings | None = None, *, worker_count: int | None = None):
     try:
-        from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
+        from fastapi import Body, Depends, FastAPI, Header, Query, Request
         from fastapi.responses import JSONResponse
+        from fastapi.encoders import jsonable_encoder
+        from fastapi.exceptions import RequestValidationError
         from fastapi.security import HTTPBearer
     except ImportError as exc:  # pragma: no cover
         raise DependencyError(
@@ -99,6 +98,11 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
     # unauthenticated API (measured: `securitySchemes: null`, every operation with
     # `security: false`) while /v1/* answered 401 -- an agent building a connector
     # from the spec would generate a client that could never authenticate.
+    AUTH_RESPONSES = {
+        422: {"description": "请求本身不合法；返回同样是扁平信封，code=invalid_request"},
+        401: {"description": "缺少或错误的 Authorization Bearer 令牌"},
+        503: {"description": "服务未配置 PVC_API_TOKEN，因此拒绝所有 /v1 请求"},
+    }
     bearer_scheme = HTTPBearer(
         auto_error=False,
         scheme_name="BearerAuth",
@@ -122,32 +126,19 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
 
     def require_token(authorization: str = Header(default="")) -> None:
         if not settings.api_token:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "ok": False,
-                    "code": "configuration",
-                    "message": "服务未配置 PVC_API_TOKEN，已拒绝所有 /v1 请求（避免匿名消耗模型额度）。",
-                    "hint": "在部署环境里设置 PVC_API_TOKEN 后重启服务。",
-                },
+            raise ServiceNotConfigured(
+                "服务未配置 PVC_API_TOKEN，已拒绝所有 /v1 请求（避免匿名消耗模型额度）。",
             )
         supplied = (authorization or "").strip()
         token = supplied[7:].strip() if supplied.lower().startswith("bearer ") else supplied
         if token != settings.api_token:
-            raise HTTPException(
-                status_code=401,
-                detail={"ok": False, "code": "unauthorized",
-                        "message": "缺少或错误的 Authorization Bearer 令牌。"},
-            )
+            raise Unauthorized("缺少或错误的 Authorization Bearer 令牌。")
 
     def style_or_400(value: str) -> str:
         style = (value or settings.style).strip()
         if style not in PROFILE_LABELS:
-            raise HTTPException(
-                status_code=400,
-                detail={"ok": False, "code": "configuration",
-                        "message": f"未知总结档位 {style!r}。可选：{'、'.join(PROFILE_LABELS)}。"},
-            )
+            raise ConfigurationError(
+                f"未知总结档位 {style!r}。可选：{'、'.join(PROFILE_LABELS)}。")
         return style
 
     def launch(job_id: str, url: str, style: str, *, relay_payload: Any = None,
@@ -257,14 +248,16 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
         }
 
     @app.get("/v1/profiles", tags=["meta"], operation_id="list_profiles",
-           dependencies=[Depends(require_token), Depends(bearer_scheme)])
+           dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def profiles() -> Any:
         return JSONResponse({"ok": True, "code": "ok", "message": "可用总结档位",
                              "profiles": list_profiles(), "labels": PROFILE_LABELS,
                              "default": settings.style})
 
     @app.get("/v1/capabilities", tags=["meta"], operation_id="get_capabilities",
-               dependencies=[Depends(require_token), Depends(bearer_scheme)])
+               dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def capabilities() -> Any:
         return JSONResponse({
             "ok": True, "code": "ok", "message": "本部署当前可用的取稿通道",
@@ -280,7 +273,8 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
         })
 
     @app.get("/v1/metadata", tags=["meta"], operation_id="get_metadata",
-           dependencies=[Depends(require_token), Depends(bearer_scheme)])
+           dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def metadata(url: str = Query(..., description="视频链接或包含链接的分享文案")) -> Any:
         canonical = validate_video_url(url, allow_unknown_platform=settings.allow_unknown_platform)
         ref = classify(canonical)
@@ -312,7 +306,8 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
     # -- jobs ----------------------------------------------------------------
 
     @app.post("/v1/jobs", tags=["jobs"], operation_id="create_job",
-            dependencies=[Depends(require_token), Depends(bearer_scheme)])
+            dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def create_job(body: dict = Body(
         ...,
         examples=[
@@ -334,14 +329,16 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
         )
 
     @app.get("/v1/jobs", tags=["jobs"], operation_id="list_jobs",
-           dependencies=[Depends(require_token), Depends(bearer_scheme)])
+           dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def list_jobs(limit: int = Query(30, ge=1, le=200), status: str = Query("")) -> Any:
         rows = store.list(limit=limit, status=status)
         return JSONResponse({"ok": True, "code": "ok", "message": f"共 {len(rows)} 条任务",
                              "jobs": [row.as_dict(include_report=False) for row in rows]})
 
     @app.get("/v1/jobs/{job_id}", tags=["jobs"], operation_id="job_status",
-           dependencies=[Depends(require_token), Depends(bearer_scheme)])
+           dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def job_status(job_id: str) -> Any:
         record = store.get(job_id)
         return JSONResponse({
@@ -352,22 +349,22 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
         })
 
     @app.get("/v1/jobs/{job_id}/report", tags=["jobs"], operation_id="job_report",
-           dependencies=[Depends(require_token), Depends(bearer_scheme)])
+           dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses={**AUTH_RESPONSES,
+                         409: {"description": "任务还没完成，data 里带当前阶段与进度"}})
     def job_report(job_id: str) -> Any:
         record = store.get(job_id)
         if not record.report:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "ok": False, "code": "not_ready", "job_id": job_id,
-                    "message": f"任务仍在 {record.stage}（进度 {record.progress:.0%}）：{record.message}",
-                    "progress": record.progress, "stage": record.stage, "status": record.status,
-                },
+            raise JobNotReady(
+                f"任务仍在 {record.stage}（进度 {record.progress:.0%}）：{record.message}",
+                job_id=job_id, stage=record.stage, progress=record.progress,
+                status=record.status,
             )
         return JSONResponse({"ok": True, "code": "ok", "message": "报告", **record.report})
 
     @app.post("/v1/jobs/{job_id}/cancel", tags=["jobs"], operation_id="cancel_job",
-            dependencies=[Depends(require_token), Depends(bearer_scheme)])
+            dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def cancel_job(job_id: str) -> Any:
         record = store.get(job_id)
         flag = cancel_flags.get(job_id)
@@ -381,7 +378,8 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
     # -- relayed transcripts -------------------------------------------------
 
     @app.post("/v1/transcripts", tags=["transcripts"], operation_id="submit_transcript",
-              dependencies=[Depends(require_token), Depends(bearer_scheme)])
+              dependencies=[Depends(require_token), Depends(bearer_scheme)],
+              responses=AUTH_RESPONSES)
     def transcripts(body: dict = Body(
         ...,
         examples=[
@@ -405,12 +403,13 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
         style = style_or_400(str(body.get("style") or ""))
         relay_payload, meta = relay_fields(body)
         if relay_payload is None:
-            raise HTTPException(status_code=422, detail={
-                "ok": False, "code": "empty_transcript", "message": "请求里没有 `transcript` 或 `segments` 字段。",
-                "hint": "可提交 {\"segments\":[{\"start\":0,\"end\":4,\"text\":\"…\"}]}、"
-                        "{\"transcript\":\"<SRT/VTT/JSON3 原文>\"}，"
-                        "或浏览器提取脚本的完整输出对象（会自识别 title / duration / sourceKind）。",
-            })
+            error = EmptyTranscript("请求里没有 `transcript` 或 `segments` 字段。")
+            error.hint = (
+                '可提交 {"segments":[{"start":0,"end":4,"text":"…"}]}、'
+                '{"transcript":"<SRT/VTT/JSON3 原文>"}，'
+                "或浏览器提取脚本的完整输出对象（会自识别 title / duration / sourceKind）。"
+            )
+            raise error
         if body.get("wait"):
             outcome = pipeline_run(
                 canonical, settings, style=style, job_id="http-sync",
@@ -423,21 +422,44 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
 
     # -- error translation ---------------------------------------------------
 
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request_handler(request: Request, exc: RequestValidationError) -> Any:
+        """FastAPI's own 422 shape is `{"detail": [...]}`; the contract is flat."""
+        return JSONResponse(
+            status_code=422,
+            content={
+                "ok": False,
+                "code": "invalid_request",
+                "message": "请求参数不符合要求，详见 data.detail。",
+                "retryable": False,
+                "data": {"detail": jsonable_encoder(exc.errors()),
+                         "hint": "字段名与类型以 /openapi.json 里的例子为准；"
+                                 "data.detail 保留框架的逐字段错误。"},
+            },
+        )
+
     @app.exception_handler(PickvedioError)
     async def pickvedio_handler(request: Request, exc: PickvedioError) -> Any:
         content = {
             "ok": False,
             "code": getattr(exc, "code", "error"),
             "message": str(exc)[:1500],
-            "hint": getattr(exc, "hint", "") or None,
             "retryable": bool(getattr(exc, "retryable", False)),
         }
+        # Same placement as the CLI: the remedy lives in `data`, so one rule for
+        # reading it covers both the command line and the HTTP connector.
+        hint = getattr(exc, "hint", "")
+        if hint:
+            content["data"] = {"hint": hint}
         # A throttle additionally says how long the endpoint asked for, when it
         # said so in whole seconds. Absent otherwise, rather than a null the
         # caller has to distinguish from "zero".
+        extra = getattr(exc, "detail_data", None)
+        if extra:
+            content.setdefault("data", {}).update(extra)
         wait = getattr(exc, "retry_after_seconds", None)
         if wait:
-            content["retry_after_seconds"] = wait
+            content.setdefault("data", {})["retry_after_seconds"] = wait
         return JSONResponse(status_code=status_for(exc), content=content)
 
     # No explicit shutdown hook: ThreadPoolExecutor registers its own atexit

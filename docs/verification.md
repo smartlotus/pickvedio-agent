@@ -1003,6 +1003,57 @@ AttributeError 才把真问题露出来——`build_client` 的规则是"Ollama 
 测试其实正沿着 0/2/6/18 秒的退避梯子打 `127.0.0.1:11434`（WinError 10061 四行日志）。
 正解是显式给 `api_key`，也就是真实部署里的样子。159 测试 0 失败。
 
+### 5y. 服务侧的 401 是 `{"detail": …}`，状态表还偷偷把没列出的错误降级成 500
+
+顺着 §5x 那条"连接器要靠 `/openapi.json`"往下测，抓到三件互相咬合的事：
+
+- 逐个把错误路径打了一遍（同进程 TestClient，桩 LLM）：
+  `401 无令牌`、`400 未知档位`、`422 没带字幕`、`409 报告未就绪` 的响应体都是
+  **`{"detail": {...}}`**——因为这四处当年是用 `HTTPException(detail=dict)` 手工抛的，
+  而同一个服务里 `JobNotFound` 之类的路径却是扁平的（`test_unknown_job_is_404_not_500`
+  一直在断言 `response.json()["code"]`）。也就是说"信封只有三个顶层键 + data"这条
+  SKILL 第一件事就教的规则，恰好在新连接器最容易撞到的几种回复上不成立。
+- 更深一层在 `status_for`：它读一张**手写的 `_STATUS` 表**，而表里最后一项是
+  `PickvedioError: 500` 兜底。`isinstance` 匹配按插入顺序，于是
+  ① 任何新加的错误类，只要没被手工列进表，就一律 500——
+  我新加的 `Unauthorized` 正是这样：响应体已经是对的，状态码却是 500；
+  ② 子类会被父类的条目抢先匹配：`ServiceNotConfigured`（本意 503 故障关门）
+  被 `ConfigurationError: 400` 吃掉，变成 400；`CancelledError` 的 499 也从没进表。
+  每个错误类自己已经写了 `http_status`，这张表就是一份会漂移的第二真值。
+- FastAPI 自己的 422（请求体类型不对，比如发过去一个数组）也是嵌套的 `detail`，
+  而且它在规范里被写成引用 `HTTPValidationError`。
+
+修法与复测：
+
+1. 删掉 `_STATUS`，`status_for` 只读 `exc.http_status`；表里的兜底项一起去掉，
+   没分类的 bug 仍是 500，分过类的错误再也不会被降级。
+2. 那五处手工 `HTTPException` 换成错误类：`Unauthorized`(401) /
+   `ServiceNotConfigured`(503，仍归在 configuration 码下) / `ConfigurationError`(400) /
+   `JobNotReady`(409，把 stage/progress/status/job_id 放进 `data`) /
+   `EmptyTranscript`(422，带写法提示)。
+3. 新增 `RequestValidationError` 处理器：框架的 422 也变扁平
+   （`code=invalid_request`，逐字段错误保留在 `data.detail` 里，不再当顶层键）。
+4. **`hint` 在服务侧也从顶层搬进 `data`**（`retry_after_seconds` 同上），
+   这样"读 remedy 只看 `data.hint`"这一条规则同时适用于命令行与连接器；
+   CLI 的远端错误解析同步改成先读 `data.hint`。
+   SKILL 的信封一节补了一句，明说 HTTP 回复会多一个顶层 `retryable`，
+   其余按同一规则读。
+5. 规范现在把 401/503 标在每个 `/v1` 操作上、把 409 标在 report 上，
+   422 的描述写明回复是扁平的。
+
+复测（同一套探针，逐条看状态码与顶层键）：
+`401 → {ok,code,message,retryable,data}` `code=unauthorized`；
+`400 → code=configuration`；`422 没带字幕 → code=empty_transcript` 且 remedy 在 `data.hint`；
+`422 框架校验 → code=invalid_request` 且字段级错误在 `data.detail`；
+`404 → code=job_not_found`。没有一处还带顶层 `detail`。
+
+我自己在这次里犯了两个错，都被测试当场抓住（这说明测试还有牙齿）：
+① 中间那版编辑把 `_STATUS` 删了却留着 `for cls, code in _STATUS.items()`，
+一次红出 10 个测试，比任何评审都快；
+② 我批量改 hint 断言时，把 `/v1/metadata` **成功**信封上的 `body["hint"]` 也改成了
+`data.hint`，于是 `KeyError: 'data'`——成功回复的顶层键本来就不受这次改动影响。
+161 测试 0 失败，ruff 干净。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

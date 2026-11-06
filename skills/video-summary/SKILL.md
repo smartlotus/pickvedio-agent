@@ -28,7 +28,7 @@ PyPI, so a bare `pip install pickvedio-core` fails with "No matching distributio
 found" and that is an install-path mistake, not a bug in the tool:
 
 ```bash
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.11"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.12"
 ```
 
 Extras go inside the bracket before the `@`:
@@ -58,6 +58,9 @@ curl fallbacks, one per service route (all need the bearer token):
 Output contract:
 - Every command prints exactly one JSON object on stdout with exactly three
   top-level keys -- `{"ok": ..., "code": ..., "message": ...}` -- plus `data`.
+  HTTP replies from the service add `retryable` beside those and carry the same
+  `hint` (and `retry_after_seconds`) inside `data`, so one reading rule covers
+  both the command line and a generated connector.
   Everything else lives inside `data`, on failures as well as successes: the
   remedy is `data.hint`, never a top-level `hint`. Parse `ok` first; on `false`,
   read `code`, `message` and `data.hint` before deciding anything. Progress

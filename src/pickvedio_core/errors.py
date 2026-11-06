@@ -83,6 +83,45 @@ class RateLimited(PickvedioError):
             )
 
 
+class Unauthorized(PickvedioError):
+    """The bearer token was missing or wrong.
+
+    A class of its own because this is the first response a freshly generated
+    connector sees, and it used to arrive as FastAPI's ``{"detail": {...}}``
+    wrapper -- which broke the documented envelope (three top-level keys plus
+    ``data``) exactly where an agent has no other information to act on.
+    """
+
+    code = "unauthorized"
+    http_status = 401
+    hint = "把 `Authorization: Bearer <PVC_API_TOKEN>` 带上；注意令牌值本身不要贴进聊天。"
+
+
+class ServiceNotConfigured(ConfigurationError):
+    """The service is running with no `PVC_API_TOKEN`, so it refuses /v1.
+
+    Same code as any other configuration problem, but a 503: nothing the caller
+    sends can fix this, the deployment has to be reconfigured and restarted.
+    """
+
+    http_status = 503
+    hint = "在部署环境里设置 PVC_API_TOKEN 后重启服务；这不是调用方能修的问题，别重试。"
+
+
+class JobNotReady(PickvedioError):
+    """A report was asked for before the job finished, with the live progress."""
+
+    code = "not_ready"
+    http_status = 409
+    hint = "继续用 `pvc job wait`（或轮询 /v1/jobs/<id>）直到 stage 变成 completed，别把它当成失败。"
+
+    def __init__(self, message: str, *, job_id: str = "", stage: str = "",
+                 progress: float = 0.0, status: str = "") -> None:
+        super().__init__(message)
+        self.detail_data = {"job_id": job_id, "stage": stage,
+                            "progress": round(progress, 4), "status": status}
+
+
 class SparseTranscript(PickvedioError):
     """Text arrived, but far too little of it for a video this long.
 

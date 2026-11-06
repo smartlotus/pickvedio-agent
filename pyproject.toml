@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pickvedio-core"
-version = "1.0.11"
+version = "1.0.12"
 description = "Turn a long video URL into a timestamped transcript and a layered Chinese summary. Headless core + JSON CLI + HTTP service, built to be deployed by an agent."
 readme = "README.md"
 requires-python = ">=3.10"

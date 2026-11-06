@@ -89,8 +89,9 @@ def test_service_without_a_configured_token_refuses_work_with_503(anonymous_clie
         "/v1/transcripts", json=relay_body(style="brief"), headers={"Authorization": "Bearer x"}
     )
     assert response.status_code == 503
-    detail = response.json()["detail"]
-    assert detail["code"] == "configuration" and "PVC_API_TOKEN" in detail["message"]
+    body = response.json()
+    assert "detail" not in body, body  # the flat envelope, like every other reply
+    assert body["code"] == "configuration" and "PVC_API_TOKEN" in body["message"]
     # Health stays reachable so a deployer can diagnose the missing variable.
     assert anonymous_client.get("/healthz").json()["inbound_token_missing"] is True
 
@@ -116,9 +117,10 @@ def test_missing_transcript_field_is_422_with_an_actionable_hint(client):
     response = client.post("/v1/transcripts", json={"url": RELAY_URL},
                            headers={"Authorization": "Bearer service-token"})
     assert response.status_code == 422
-    detail = response.json()["detail"]
-    assert detail["code"] == "empty_transcript"
-    assert "segments" in detail["hint"] and "sourceKind" in detail["hint"]
+    body = response.json()
+    assert "detail" not in body, body
+    assert body["code"] == "empty_transcript"
+    assert "segments" in body["data"]["hint"] and "sourceKind" in body["data"]["hint"]
 
 
 def test_unknown_style_is_400_listing_valid_choices(client):
@@ -126,7 +128,10 @@ def test_unknown_style_is_400_listing_valid_choices(client):
     response = client.post("/v1/transcripts", json=body,
                            headers={"Authorization": "Bearer service-token"})
     assert response.status_code == 400
-    message = response.json()["detail"]["message"]
+    body = response.json()
+    assert "detail" not in body, body
+    assert body["code"] == "configuration"
+    message = body["message"]
     assert "podcast" in message and "general" in message
 
 
@@ -184,8 +189,13 @@ def test_report_before_completion_is_409_with_progress(client, monkeypatch):
     job_id = created.json()["job_id"]
     response = client.get(f"/v1/jobs/{job_id}/report", headers=headers)
     assert response.status_code == 409
-    detail = response.json()["detail"]
-    assert detail["code"] == "not_ready" and detail["job_id"] == job_id
+    body = response.json()
+    assert "detail" not in body, body
+    assert body["code"] == "not_ready"
+    # progress, stage and status now sit in `data`, where the envelope puts
+    # everything that is not ok/code/message.
+    assert body["data"]["job_id"] == job_id, body
+    assert body["data"]["progress"] <= 1.0 and "stage" in body["data"]
 
 
 def test_unknown_job_is_404_not_500(client):

@@ -177,3 +177,73 @@ def test_operation_ids_are_named_for_machines_not_for_fastapi(client):
             "create_job", "list_jobs", "job_status", "job_report", "cancel_job",
             "submit_transcript"} == ids
     assert json.dumps(sorted(ids)).isascii()
+
+
+def test_every_error_body_keeps_the_documented_envelope_shape(tmp_path, stub_llm, monkeypatch):
+    """No `{"detail": {...}}` anywhere: an agent branches on top-level `code`.
+
+    The service used to answer its four hand-raised failures through FastAPI's
+    HTTPException wrapper, so the body was `{"detail": {"ok": ..., "code": ...}}`
+    -- the one contract the SKILL file states first ("exactly three top-level
+    keys plus data") was broken by exactly the errors a new caller meets first.
+    """
+    settings = _settings(tmp_path, stub_llm, monkeypatch)
+    with TestClient(create_app(settings)) as authorised:
+        wrong = authorised.get("/v1/profiles", headers={"Authorization": "Bearer nope"})
+        assert wrong.status_code == 401
+        body = wrong.json()
+        assert "detail" not in body, body
+        assert body["ok"] is False and body["code"] == "unauthorized", body
+        # The service keeps `hint` beside `code` (the CLI puts it in `data`); the
+        # point of this test is that nothing is wrapped in `detail`.
+        assert body["data"]["hint"], body
+
+        bad_style = authorised.post("/v1/jobs", headers={"Authorization": f"Bearer {TOKEN}"},
+                                    json={"url": "https://www.bilibili.com/video/BV1rjKn6CETw/",
+                                          "style": "nonsense"})
+        assert bad_style.status_code == 400
+        shape = bad_style.json()
+        assert "detail" not in shape and shape["code"] == "configuration", shape
+
+        no_transcript = authorised.post("/v1/transcripts",
+                                        headers={"Authorization": f"Bearer {TOKEN}"},
+                                        json={"url": "https://www.bilibili.com/video/BV1rjKn6CETw/"})
+        assert no_transcript.status_code == 422
+        missing = no_transcript.json()
+        assert "detail" not in missing and missing["code"] == "empty_transcript", missing
+        assert missing["data"]["hint"], missing
+
+    # FastAPI's own validation failure (a body that is not an object at all) used
+    # to be the last nested reply left in the service.
+    invalid = authorised.post("/v1/jobs", headers={"Authorization": f"Bearer {TOKEN}"},
+                              json=["not", "an", "object"])
+    assert invalid.status_code == 422
+    nested = invalid.json()
+    assert "detail" not in nested and nested["code"] == "invalid_request", nested
+    assert nested["data"]["detail"], nested
+
+    unconfigured = Settings.load()
+    monkeypatch.delenv("PVC_API_TOKEN", raising=False)
+    unconfigured.api_token = ""
+    unconfigured.workdir = tmp_path / "other"
+    with TestClient(create_app(unconfigured)) as naked:
+        refused = naked.get("/v1/profiles")
+        assert refused.status_code == 503
+        body = refused.json()
+        assert "detail" not in body and body["code"] == "configuration", body
+        assert body["data"]["hint"], body
+
+
+def test_auth_and_not_ready_failures_are_documented_in_the_spec(client):
+    """A client generator has to be told these statuses exist."""
+    spec = client.get("/openapi.json").json()
+    for path, item in spec["paths"].items():
+        for method, operation in item.items():
+            if not path.startswith("/v1/"):
+                continue
+            assert "401" in operation["responses"], f"{method.upper()} {path}"
+            assert "503" in operation["responses"], f"{method.upper()} {path}"
+    report = spec["paths"]["/v1/jobs/{job_id}/report"]["get"]["responses"]
+    assert "409" in report
+    assert "invalid_request" in json.dumps(spec["paths"]["/v1/jobs"]["post"]["responses"],
+                                           ensure_ascii=False)

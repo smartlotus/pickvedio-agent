@@ -83,7 +83,9 @@ class _Remote:
             detail = ""
             try:
                 body = response.json()
-                detail = body.get("error") or body.get("hint") or response.text[:300]
+                data = body.get("data") or {}
+                detail = (data.get("hint") or body.get("error") or body.get("hint")
+                          or response.text[:300])
             except ValueError:
                 detail = response.text[:300]
             raise PickvedioError(f"服务返回 {response.status_code}：{detail}")

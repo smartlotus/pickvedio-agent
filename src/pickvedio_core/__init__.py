@@ -34,7 +34,7 @@ from .models import Report, Segment, SourceKind, SummaryPlan, Transcript, Transc
 from .prompts import PROFILE_LABELS, load as load_prompts
 from .urls import classify, extract_video_urls, validate_video_url
 
-__version__ = "1.0.11"
+__version__ = "1.0.12"
 
 REPO_URL = "https://github.com/smartlotus/pickvedio-agent"
 
