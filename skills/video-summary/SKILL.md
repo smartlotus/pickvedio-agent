@@ -28,7 +28,7 @@ PyPI, so a bare `pip install pickvedio-core` fails with "No matching distributio
 found" and that is an install-path mistake, not a bug in the tool:
 
 ```bash
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.10"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.11"
 ```
 
 Extras go inside the bracket before the `@`:
@@ -62,6 +62,11 @@ Output contract:
   remedy is `data.hint`, never a top-level `hint`. Parse `ok` first; on `false`,
   read `code`, `message` and `data.hint` before deciding anything. Progress
   lines go to stderr and are not part of the envelope.
+- A deployed service describes itself at `/openapi.json`: it declares the
+  `BearerAuth` scheme, attaches it to every `/v1/*` operation, and carries named
+  examples for both POST bodies. Build a connector from that document. If every
+  call answers 401, the generated client dropped the `Authorization: Bearer`
+  header -- fix the client rather than retrying the call.
 - `resolve` -> `data.platform`, `data.video_id`, `data.title`, `data.duration`,
   plus the canonical `data.url`. Use the canonical URL in every later call.
   For a `b23.tv` short link `data.short_link` is `true` and `data.video_id` is

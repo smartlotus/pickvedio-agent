@@ -158,7 +158,9 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
    （git clone + bash bootstrap.sh，看到 "verdict: READY"），再用它指向刚部署的域名，
    每一步的原始输出都贴给我：
    curl -fsS "https://<域名>/healthz"
-   curl -fsS "https://<域名>/openapi.json" | head -c 400
+   curl -fsS "https://<域名>/openapi.json" | python3 -c "import json,sys; d=json.load(sys.stdin); print('bearer scheme:', 'BearerAuth' in (d.get('components') or {}).get('securitySchemes', {}))"
+   # 这个文档已经声明 BearerAuth 与两个 POST 的例子，连接器可以直接照着它生成；
+   # 若生成出来的客户端一律 401，八成是没把 Authorization: Bearer 头带上
    .venv/bin/pvc status
    .venv/bin/pvc status --service "https://<域名>" --token "<PVC_API_TOKEN>"
    .venv/bin/pvc check
@@ -174,7 +176,7 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
 ```bash
 curl -fsS "https://<域名>/healthz"                      # -> 200，免令牌
 curl -fsS "https://<域名>/v1/profiles" -H "Authorization: Bearer $PVC_API_TOKEN"
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.10"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.11"
                                                          # 这个名字不在 PyPI 上，必须带 git+ 地址；
                                                          # clone 过的话用 bash bootstrap.sh 更省事
 export PVC_SERVICE_URL="https://<域名>"

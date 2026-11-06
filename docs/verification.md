@@ -955,6 +955,54 @@ Anaconda 自带 PyYAML，而 Test 作业只装 `.[dev]`。这是本轮第二次�
 安装归 runbook），`manifest.yaml` 的 connector 名仍是下划线 `video_summary`。
 CI 8 个作业与 Release 都在 `1a7991f` 上绿。
 
+### 5x. /openapi.json 是给机器读的合同：它此前根本没说自己要令牌
+
+审计方式：把服务真起来（uvicorn + 一个桩 LLM），取 `/openapi.json` 逐字段判。
+改之前实测到的形状：
+
+- `components.securitySchemes` 是 **null**，10 个操作的 `security` **全部为空**，
+  而 `/v1/*` 确实要 `Authorization: Bearer`（不带就是 401）——文档一边写着
+  "documents the scheme in OpenAPI"，一边那个 `HTTPBearer` 只是被 import 进来没用到。
+  任何照 `/openapi.json` 生成客户端的 agent（runbook 与 Railway 块让它 curl 这个地址）
+  都会拿到一个不带令牌的客户端，然后被 401 挡住，且规范里查不到原因。
+- 操作名是 FastAPI 自动生成的 `healthz_healthz_get`、`create_job_v1_jobs_post` 这类；
+  两个 POST 的 requestBody 只有 `{"type":"object"}`，**一个例子都没有**。
+
+改完后（同一审计脚本复测）：
+
+- `BearerAuth`（http/bearer，bearerFormat opaque）被声明，描述里点名
+  `PVC_API_TOKEN` 与"未配令牌时故意 503"；`/v1/*` 十个操作里除 healthz 外全部带上
+  security，`/healthz` 保持不带（它本来就免令牌）。
+  强制仍然只在 `require_token` 里（它容忍不带 `Bearer ` 前缀的老写法）——
+  新增的这个依赖是 `auto_error=False` 的文档用途，不改任何状态码。
+- 十个操作都有明确 `operation_id`（`health_check`/`list_profiles`/`get_capabilities`/
+  `get_metadata`/`create_job`/`list_jobs`/`job_status`/`job_report`/`cancel_job`/
+  `submit_transcript`），不再有 `_get`/`_post` 尾巴。
+- 两个 POST 各带两份**命名例子**：transcripts 是"浏览器回传的 segments"与
+  "SRT/VTT 原文"，jobs 是"最小任务"与"带去重窗口"。
+  FastAPI 把 `Body(..., examples=[...])` 放进 **schema**，而多数 OpenAPI 读者在
+  **operation** 上找例子，所以加了一层 `app.openapi` 包装把它们搬到
+  `content.examples` 并起名；`zip(names, examples, strict=True)` 保证标签与例子
+  数量不齐时直接抛，而不是静默截断。
+
+新测试 `tests/test_openapi_contract.py`（7 个）里判据分两层：
+
+- **真发出去的**：transcripts 的两份例子按原样 POST（体里就带文字，不碰平台），
+  `wait:true` 那份当场返回报告、另一份返回 job id——例子是被验过的，不是摆设。
+- **不发的**：jobs 的例子会让服务自己去平台取稿，所以改为逐字段核它宣传的值真能用
+  （URL 解析得开、style 在 PROFILE_LABELS 里、dedup 是整数）。
+  这条区别写进测试文档字符串，避免"所有例子都发过"这种说过头的话。
+- 门禁本身能红：`_contract_gaps()` 拿今天之前的那份文档形状（无 scheme、无 security、
+  自动 id、无例子）判出 6 类缺陷；空 paths 判 0（不假装严格）。
+
+两处我自己的量具先骗了我：① 文件里残留了一份旧的 `client` fixture 把新的盖掉，
+表现为 `_settings() missing 1 required positional argument`；
+② 我想用 `settings.ollama.enabled = False` 关掉本地 Ollama，`enabled` 是只读属性，
+AttributeError 才把真问题露出来——`build_client` 的规则是"Ollama 启用且没有 api_key
+就走本地"，所以 mutate 之后的 `settings.llm.*` 根本改不动传输层，
+测试其实正沿着 0/2/6/18 秒的退避梯子打 `127.0.0.1:11434`（WinError 10061 四行日志）。
+正解是显式给 `api_key`，也就是真实部署里的样子。159 测试 0 失败。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

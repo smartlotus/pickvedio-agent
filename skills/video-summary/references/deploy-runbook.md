@@ -24,7 +24,9 @@ session; this runbook only drives them.
 3. 部署完成后把服务域名告诉我，只给域名，不要带任何密钥。
 4. 然后依次验证并把每一步的 JSON 原样贴给我：
    curl -fsS "https://<域名>/healthz"
-   curl -fsS "https://<域名>/openapi.json" | head -c 400
+   curl -fsS "https://<域名>/openapi.json" | python3 -c "import json,sys; d=json.load(sys.stdin); print('bearer scheme:', 'BearerAuth' in (d.get('components') or {}).get('securitySchemes', {}))"
+   # 这份文档已经声明 BearerAuth、给每个 /v1 操作带上 security，并给两个 POST 各带命名例子；
+   # 照着它生成连接器即可。若生成出来的客户端一律 401，是没带 Authorization: Bearer 头
    pvc status
    pvc status --service "https://<域名>"
    pvc check
@@ -201,10 +203,10 @@ Honest list, because each one changes how the agent must behave:
 
 ```bash
 # pickvedio-core is not on PyPI; install it from this repository.
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.10"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.11"
 # or, from a clone: bash bootstrap.sh   (creates ./.venv and self-tests it)
 # or, with no git on the machine: the wheel attached to the tag (anonymous GET)
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.10/pickvedio_core-1.0.10-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.11/pickvedio_core-1.0.11-py3-none-any.whl"
 cat > ~/.pvc.env <<'ENV'
 export PVC_SERVICE_URL="https://<hostname>"
 export PVC_API_TOKEN="<inbound token>"

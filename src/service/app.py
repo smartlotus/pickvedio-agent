@@ -79,7 +79,7 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
     try:
         from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request
         from fastapi.responses import JSONResponse
-        from fastapi.security import HTTPBearer  # noqa: F401 - documents the scheme in OpenAPI
+        from fastapi.security import HTTPBearer
     except ImportError as exc:  # pragma: no cover
         raise DependencyError(
             f"服务依赖未安装：python3 -m pip install \"{install_spec('service')}\""
@@ -93,6 +93,19 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
     )
     cancel_flags: dict[str, threading.Event] = {}
     running: dict[str, Any] = {"started_at": time.time()}
+
+    # `require_token` below is what actually rejects a request; this object exists so
+    # that requirement appears in /openapi.json. Without it the document claimed an
+    # unauthenticated API (measured: `securitySchemes: null`, every operation with
+    # `security: false`) while /v1/* answered 401 -- an agent building a connector
+    # from the spec would generate a client that could never authenticate.
+    bearer_scheme = HTTPBearer(
+        auto_error=False,
+        scheme_name="BearerAuth",
+        bearerFormat="opaque",
+        description="PVC_API_TOKEN，写成 `Authorization: Bearer <token>`。"
+                    "未配置令牌时服务故意对所有 /v1 请求返回 503。",
+    )
 
     app = FastAPI(
         title="pickvedio-core",
@@ -194,7 +207,39 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
 
     # -- meta ----------------------------------------------------------------
 
-    @app.get("/healthz", tags=["meta"])
+    # FastAPI puts `Body(..., examples=[...])` on the *schema*. Most OpenAPI
+    # readers -- including the client generators an agent-built connector leans
+    # on -- look for named examples on the operation instead, so they are hoisted
+    # here with labels that say which shape each one is. Without this the two
+    # documented shapes were present-but-invisible to exactly the consumer they
+    # were written for.
+    _labels = {
+        ("/v1/transcripts", "post"): ["浏览器回传的 segments", "SRT/VTT 原文"],
+        ("/v1/jobs", "post"): ["最小任务", "带去重窗口"],
+    }
+    _generate_openapi = app.openapi
+
+    def _openapi_with_operation_examples() -> dict:
+        spec = _generate_openapi()
+        for path, item in (spec.get("paths") or {}).items():
+            for method, operation in item.items():
+                content = ((operation.get("requestBody") or {}).get("content") or {}).get(
+                    "application/json")
+                if not isinstance(content, dict):
+                    continue
+                examples = (content.get("schema") or {}).get("examples")
+                if not isinstance(examples, list) or not examples:
+                    continue
+                names = _labels.get((path, method)) or [f"example {i + 1}" for i in range(len(examples))]
+                content["examples"] = {
+                    name: {"value": value}
+                    for name, value in zip(names, examples, strict=True)
+                }
+        return spec
+
+    app.openapi = _openapi_with_operation_examples
+
+    @app.get("/healthz", tags=["meta"], operation_id="health_check")
     def healthz() -> dict[str, Any]:
         """Unauthenticated liveness probe, also the deploy-verification target."""
         return {
@@ -211,13 +256,15 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
             "inbound_token_missing": not settings.api_token,
         }
 
-    @app.get("/v1/profiles", tags=["meta"], dependencies=[Depends(require_token)])
+    @app.get("/v1/profiles", tags=["meta"], operation_id="list_profiles",
+           dependencies=[Depends(require_token), Depends(bearer_scheme)])
     def profiles() -> Any:
         return JSONResponse({"ok": True, "code": "ok", "message": "可用总结档位",
                              "profiles": list_profiles(), "labels": PROFILE_LABELS,
                              "default": settings.style})
 
-    @app.get("/v1/capabilities", tags=["meta"], dependencies=[Depends(require_token)])
+    @app.get("/v1/capabilities", tags=["meta"], operation_id="get_capabilities",
+               dependencies=[Depends(require_token), Depends(bearer_scheme)])
     def capabilities() -> Any:
         return JSONResponse({
             "ok": True, "code": "ok", "message": "本部署当前可用的取稿通道",
@@ -232,7 +279,8 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
             ],
         })
 
-    @app.get("/v1/metadata", tags=["meta"], dependencies=[Depends(require_token)])
+    @app.get("/v1/metadata", tags=["meta"], operation_id="get_metadata",
+           dependencies=[Depends(require_token), Depends(bearer_scheme)])
     def metadata(url: str = Query(..., description="视频链接或包含链接的分享文案")) -> Any:
         canonical = validate_video_url(url, allow_unknown_platform=settings.allow_unknown_platform)
         ref = classify(canonical)
@@ -263,8 +311,16 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
 
     # -- jobs ----------------------------------------------------------------
 
-    @app.post("/v1/jobs", tags=["jobs"], dependencies=[Depends(require_token)])
-    def create_job(body: dict = Body(...)) -> Any:
+    @app.post("/v1/jobs", tags=["jobs"], operation_id="create_job",
+            dependencies=[Depends(require_token), Depends(bearer_scheme)])
+    def create_job(body: dict = Body(
+        ...,
+        examples=[
+            {"url": "https://www.bilibili.com/video/BV1rjKn6CETw/", "style": "general"},
+            {"url": "https://www.bilibili.com/video/BV1rjKn6CETw/", "style": "brief",
+             "dedup_minutes": 120},
+        ],
+    )) -> Any:
         url = str(body.get("url") or "")
         style = style_or_400(str(body.get("style") or ""))
         canonical = validate_video_url(url, allow_unknown_platform=settings.allow_unknown_platform)
@@ -277,13 +333,15 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
             dedup_minutes=int(body.get("dedup_minutes", 60) or 0),
         )
 
-    @app.get("/v1/jobs", tags=["jobs"], dependencies=[Depends(require_token)])
+    @app.get("/v1/jobs", tags=["jobs"], operation_id="list_jobs",
+           dependencies=[Depends(require_token), Depends(bearer_scheme)])
     def list_jobs(limit: int = Query(30, ge=1, le=200), status: str = Query("")) -> Any:
         rows = store.list(limit=limit, status=status)
         return JSONResponse({"ok": True, "code": "ok", "message": f"共 {len(rows)} 条任务",
                              "jobs": [row.as_dict(include_report=False) for row in rows]})
 
-    @app.get("/v1/jobs/{job_id}", tags=["jobs"], dependencies=[Depends(require_token)])
+    @app.get("/v1/jobs/{job_id}", tags=["jobs"], operation_id="job_status",
+           dependencies=[Depends(require_token), Depends(bearer_scheme)])
     def job_status(job_id: str) -> Any:
         record = store.get(job_id)
         return JSONResponse({
@@ -293,7 +351,8 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
             **record.as_dict(include_report=False),
         })
 
-    @app.get("/v1/jobs/{job_id}/report", tags=["jobs"], dependencies=[Depends(require_token)])
+    @app.get("/v1/jobs/{job_id}/report", tags=["jobs"], operation_id="job_report",
+           dependencies=[Depends(require_token), Depends(bearer_scheme)])
     def job_report(job_id: str) -> Any:
         record = store.get(job_id)
         if not record.report:
@@ -307,7 +366,8 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
             )
         return JSONResponse({"ok": True, "code": "ok", "message": "报告", **record.report})
 
-    @app.post("/v1/jobs/{job_id}/cancel", tags=["jobs"], dependencies=[Depends(require_token)])
+    @app.post("/v1/jobs/{job_id}/cancel", tags=["jobs"], operation_id="cancel_job",
+            dependencies=[Depends(require_token), Depends(bearer_scheme)])
     def cancel_job(job_id: str) -> Any:
         record = store.get(job_id)
         flag = cancel_flags.get(job_id)
@@ -320,8 +380,19 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
 
     # -- relayed transcripts -------------------------------------------------
 
-    @app.post("/v1/transcripts", tags=["transcripts"], dependencies=[Depends(require_token)])
-    def transcripts(body: dict = Body(...)) -> Any:
+    @app.post("/v1/transcripts", tags=["transcripts"], operation_id="submit_transcript",
+              dependencies=[Depends(require_token), Depends(bearer_scheme)])
+    def transcripts(body: dict = Body(
+        ...,
+        examples=[
+            {"url": "https://www.bilibili.com/video/BV1rjKn6CETw/", "style": "brief",
+             "wait": True,
+             "segments": [{"start": 0.0, "end": 12.0, "text": "开场给出今天要讲的三件事。"}]},
+            {"url": "https://www.bilibili.com/video/BV1rjKn6CETw/",
+             "transcript": "[00:00:00,000 --> 00:00:12,000]\n开场给出今天要讲的三件事。\n",
+             "title": "示例视频", "duration": 60, "source_kind": "up_subtitles"},
+        ],
+    )) -> Any:
         """Accept a transcript obtained elsewhere and summarise it.
 
         Recommended default route for an agent: no media pipeline, no platform
