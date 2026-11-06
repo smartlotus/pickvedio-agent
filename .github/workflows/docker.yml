@@ -52,10 +52,10 @@ jobs:
             tag_suffix: "-ffmpeg"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         # GITHUB_TOKEN can push to the current repo's ghcr.io namespace as long
@@ -70,7 +70,7 @@ jobs:
 
       - name: Docker metadata (tags and labels)
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
           tags: |
@@ -82,7 +82,7 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}},suffix=${{ matrix.tag_suffix }}
 
       - name: Build and push with provenance + SBOM attestations
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile
