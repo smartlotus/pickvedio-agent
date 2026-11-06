@@ -215,7 +215,11 @@ def to_transcript(
         source_kind = str(document.get("sourceKind") or document.get("source") or "")
     key = (source_kind or "").strip().lower().replace("-", "_")
 
-    segments = segments_from_payload(payload, name=name, fmt=fmt, duration=duration)
+        # document, not payload: the text branch above already decoded a pasted JSON
+    # object or array, and handing the raw string onward meant a pasted empty
+    # array skipped the list branch, fell into the caption-body parser, and came
+    # back as one cue of literal text -- an empty relay that exited 0 as success.
+    segments = segments_from_payload(document, name=name, fmt=fmt, duration=duration)
     # Judged before normalise: that step gives a zero-length cue a 2-second
     # floor, which would make an entirely untimed payload look timed.
     timed = any(item.end > item.start or item.start > 0 for item in segments)
