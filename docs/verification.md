@@ -505,6 +505,39 @@ git 依赖时，在**全新 clone** 里 `git checkout v1.0.2` 被 "docs/verifica
 **绕过 git 的写入路径，同时绕过了 git 替你守住的字节约定**；上一条里"修类不修拼写"
 的原则，在这里的对应形态是"写入必须走会被过滤器看见的路"。
 
+## 5j. 产品自己在提示里给了 agent 一个不存在的开关
+
+用 1.0.2 的发布件对真站跑判定阶梯时，`pvc fetch` 返回 `code:"needs_browser"`，
+而它 `data.hint` 的第一条出路写的是：
+
+```
+然后 `pvc push --url <链接> --transcript relay.json --summarize`
+```
+
+`pvc push` 没有 `--summarize`（`pvc push --help` 里就数不出这个选项），照做的 agent
+只会拿到 argparse 的退出码 2——而这一行是整个产品被读得最多的一行字，
+每一个走到第二级的 agent 都会执行它，于是"需要已登录浏览器"这个真话
+被替换成"工具坏了"。同一类问题还有一处：`sources/__init__.py` 的模块 docstring
+宣称 `pvc fetch --channel`，`fetch` 也没有这个开关。
+
+修法不止改两句字。新增 `test_no_hint_or_doc_invents_a_pvc_flag`：
+
+- 用 `build_parser()` 反查每个子命令**真正**接受的选项集合；
+- 扫 `src/**.py`、`skills/**.md`、`docs`、`deploy`、`prompts`、README、AGENTS 里所有
+  `pvc <子命令> …` 出现处，抽出其中每一个 `--开关`，凡 parser 不认的就报文件与行号；
+- 今天的实际覆盖面是 95 个开关 / 56 行，测试里有 `checked >= 60` 的下限断言；
+- 负对照：把 `pvc push … --summarize` 原句喂给同一个分类器，必须判红。
+
+写这道门禁的过程中它自己错了两次，两次都是那条下限断言把我揪住的：第一次拿
+`a.choices` 去找子命令动作，命中了 `--format`（它的 choices 是个 list）而崩在 `.items()`；
+第二次用一层 `glob("*.md")`，`skills/video-summary/SKILL.md` 和 `src/**/ladder.py`
+根本没被读到，只"检查"了 10 个开关。另外 `pvc job` 不是嵌套 subparser，
+而是一个带位置参数的 parser，所以 `job create|status|wait|list` 统一按 `job` 的合法集合校验。
+
+文案改成真实存在的用法：`push` 建的就是总结任务，长视频的正确说法是
+`pvc push … --style brief` 之后 `pvc job wait --id <job_id>`。
+本地复验：ruff 干净，130 项测试 0 失败。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
