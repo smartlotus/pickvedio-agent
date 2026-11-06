@@ -354,9 +354,14 @@ curl -L .../releases/download/v1.0.0/pickvedio_core-1.0.0-py3-none-any.whl -> 20
 桌面版那条本地 Ollama 路径仍然按 seed 走——防止修过头。seed 只在装有桌面版的机器上存在，
 所以 Muse 云电脑与 Railway 容器本来不受影响；受影响的是用户自己的这台机。
 
-顺带一条环境事实（不是缺陷）：本机 shell 里存在 `DEEPSEEK_API_KEY`/`OPENAI_API_KEY`
-之类变量，`_env` 会按别名顺序读到它们，所以在这台机上 `llm_configured` 会是 true。
-CI 里不存在这些变量，`pvc check`/`pvc status` 的判定不依赖它们。
+顺带把 `/healthz` 的两个字段说清楚（我第一次把它们读错了）：
+`llm_configured = bool(settings.llm.api_key or settings.ollama.enabled)`，
+`llm_model = settings.llm.model or settings.ollama.model`。所以那次 `llm_configured: true`
+**不是**本机有什么隐藏 key —— 实测这台机 shell 里
+`PVC_LLM_API_KEY`/`PVC_API_KEY`/`DEEPSEEK_API_KEY`/`OPENAI_API_KEY` 四个名字全部未设
+（只查名字与长度，不打印值），true 来自 seed 让 `OllamaSettings.enabled` 成立
+（`enabled = bool(model)`）。也就是说这两个字段在"本地 Ollama 可用"与"远程 key 已配"之间
+本来就是同一个布尔，读的人容易误会；要区分就看 `pvc status` 的 `missing` 数组。
 
 ## 6. 尚未验证 / still to verify after deployment
 
