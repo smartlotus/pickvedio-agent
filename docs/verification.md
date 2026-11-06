@@ -891,6 +891,25 @@ Anaconda 自带 PyYAML，而 Test 作业只装 `.[dev]`。这是本轮第二次�
 
 1.0.9 带这些改动，因为它们改的是 agent 分支用的 `code` 与它决定花钱前看到的数。
 
+### 5v. 1.0.9 发布件的六项实测（含一处我自己探针写错的字）
+
+干净 venv 装 `pickvedio_core-1.0.9-py3-none-any.whl`（字节与 REST `digest`
+`133eb350…` 相等），本机 127.0.0.1 桩模型，六个探针：
+
+| 探针 | 实测 |
+| --- | --- |
+| 240 段 × 1 小时回传 → `pvc push --out` | `ok=true`、8 个文件、SRT 正好 240 条 ` --> ` 帧、桩被打 4 次 |
+| 20 段 × 30 分钟（太稀） | `rc=1`、`code=sparse_transcript`、`data.hint` 非空、桩 0 次 |
+| `pvc summarize --estimate-only`（匿名） | 依旧 `needs_browser`、0 次——这正是 §5u 说清的那条限制，不是新故障 |
+| `pvc push --estimate-only`（同一份满量回传） | `ok=true`、`chunks=3`、`estimated_calls.total=4`、正文里"至少 4 次"与 data 相等、桩 0 次 |
+| `pvc push --estimate-only`（稀回传） | `sparse_transcript` + hint，估算不会承诺随后会被拒的总结 |
+| `pvc push --estimate-only --service …` | `code=configuration`、0 次——在 POST 之前就停，不会一边估算一边花钱 |
+
+探针自身的一处错：我拿关键字 `"重新"` 去验密度分支的 hint，而那句真实写的是
+"再跑一次 browser-extract.js"，所以 `hint_says_re_extract=false` 是探针的字选错了，
+不是 hint 缺内容（测试里对同一 hint 的断言用的是 `提取时机太早`，CI 全绿）。
+不为凑探针去改 hint 文本；记录在这儿是因为"探针红了"和"产品红了"必须分清。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
