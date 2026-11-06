@@ -681,7 +681,8 @@ reason 断言 hint 有 4 种，防止退化成一坨常量；
   被 `normalise` 的 `start > duration + 5` 丢掉（104+5<120），少了 1 段——
   那是夹具的错，顺带证明稀疏门禁真在读时长。
 - 顺手把两处样式缺陷改在主线：`duration` 那个 `if` 的块多缩进 4 格、一条 137 字长行。
-  它们不改行为，所以没为此再发一版；agent 装的是 `@v1.0.5` 固定标签，读不到这个差异。
+  它们不改行为，当时判断"不为此再发一版"——后来发现发布件里带的是**指令块本身**，
+  而那三处修正也要给 agent 读到，所以到底还是出了 1.0.6，见 §5p。
 - 同一轮还审了**要贴给 Muse 的指令块本身**，纠出三处：
   ① `deploy/muse-setup.md` 里那句"英文界面的 Muse 会话请用 runbook 的英文块"是指向
   路线 2 的：runbook 只有 Railway 的英文块，按默认路线（云电脑本地跑）读过去的人会
@@ -692,6 +693,29 @@ reason 断言 hint 有 4 种，防止退化成一坨常量；
   一次 18000 字的补全截断成不可用 JSON（troubleshooting 表里那条 502 就是它）。
   ③ 路线 1 第 3.d 步原本只说"把 reason 和 warnings 原样告诉我"，而 §5n 之后 CLI 已经
   会给出具体去向：改成**以 `data.hint` 为下一步的权威指令**，并列出它区分开的三种结局。
+
+### 5p. 把发布出去的 skill 包拆开看（这才明白 1.0.5 的包不带 §5o 的文档修正）
+
+Muse 装的从来不是仓库源码，而是 release 里那个 `video-summary-skill-<ver>.zip`，
+所以把它取下来逐字节看了：
+
+- 资产通道照旧走 API（`releases/download` 在这台机仍被 reset），
+  落盘 sha256 与 REST `digest` 字段给出的 `67f1e61d…` 相等，35325 B。
+- 包内 7 个条目：`SKILL.md`、`manifest.yaml`、`assets/browser-extract.js`、
+  `eval/scenarios.yaml`、`references/{browser-extract,deploy-runbook,troubleshooting}.md`。
+  `SKILL.md` 里 `data.hint` 出现 2 次、`relay.json`、`short_link`、`data.artifacts`
+  与 `@v1.0.5` 固定标签都在；reason 表里 §5n 新增的三行也都在。
+- 第一次判"JS 与仓库不一致"是我的量具错了：这台机 `core.autocrlf=true`，
+  工作区里的 `browser-extract.js` 带 745 个 CRLF（31008 B），包里是纯 LF（30263 B）；
+  把行尾归一后两边 sha256 相同（`51470d64…`），`SKILL.md` 同样相等。
+  所以这条比对必须以 LF 口径做，不然每次都会报假漂移。
+- `manifest.yaml` 第一行 `version: 1` 不是包版本，是 Muse manifest 的模式号；
+  真正的安装版本在 `SKILL.md` 的 `@v1.0.5` 固定标签上，两者不是一回事。
+- 于是 §5o 那三处指令块修正**不在 v1.0.5 的包里**——它们是在 tag 之后提交到 main 的。
+  这正是 agent 会读的那份文件，所以出一版 1.0.6 把它们带进发布件；
+  13 处 `1.0.5` 固定标签（AGENTS/README/pyproject/muse-setup/SKILL/deploy-runbook/
+  troubleshooting/`__init__`）一次扫齐，CI 的"文档里的 pin 必须等于 pyproject 版本"
+  那道门会当场否掉漏网的。代码相对 1.0.5 只差 §5o 说的两处纯样式。
 
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
