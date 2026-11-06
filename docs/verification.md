@@ -1104,6 +1104,37 @@ fail-closed 而不是崩、422 `invalid_request` 去照 `/openapi.json` 的例�
 1.0.13：这批文档就是 skill 包里 agent 必读的 `SKILL.md` 与 `references/`，
 不发版的话 Muse 拿不到这份词表。
 
+### 5aa. POST 回复里没有 ok 也没有 code：本轮唯一"改了反而更绿"的发现
+
+在 1.0.13 的服务上直接打四个请求，量顶层键：
+
+- `POST /v1/jobs` → `['job_id', 'message', 'status', 'style']`
+- `POST /v1/transcripts` → `['job_id', 'message', 'relayed', 'status', 'style']`
+- `POST /v1/jobs/<id>/cancel` → 有 `ok`/`code`；`GET /v1/jobs` → 有；`GET /healthz` → 只有 `ok`
+
+也就是说**唯一起作用的两条 POST**（任务就是从这儿开始的）不带任何判定字段，
+而 SKILL 的阶梯是 `Parse ok first; on false, read code…`。
+文档写的是三条顶层键 + data，回复给的是四条业务键零条判定键。
+
+补：`launch()` 与 `submit()` 的两处回复加 `ok`/`code`（queued / ok，`reused` 那条是 ok），
+`/healthz` 也补 `code`——不留"探活端点例外"这种需要记住的例外，
+一个规则比一条规则加一条注释便宜。
+这是**纯增字段**，老读者按 `job_id`/`status` 取的代码不受影响，所以不发破坏性版本也成立。
+
+新门禁 `tests/test_service_verdicts.py`（3 个测试，先红后绿：红的时候报的就是
+`replies without ok/code: {'POST /v1/jobs': [...], ...}`）：每个端点的回复都必须带
+`ok` 与 `code`；POST 之后立刻真的轮询与取消，让那些回复也落进同一判据；
+并把 1.0.13 真实发出去的那两个 body 原样种进判据函数，要求它必须报缺——
+这道门能红，不是靠我宣布它严。
+
+诚实边界（这次**没做**的）：把成功回复的业务字段整体收进 `data`（§5y 记的那条）
+仍然没做。这次只把"缺判定键"这一条硬缺陷补上，因为它是纯加法、能当场验；
+统一嵌套是一次有意的破坏性变更，要连着改 CLI 的远端读法与三份文档的信封章节。
+我在动手统一嵌套时先做了一次跨 13 处的批量改写，两处语法被打断（capabilities 的
+`"unconfigured":` 没改成关键字形式、cancel 分支留下旧字典的收尾括号），
+1 个测试文件收集失败——于是我**把两个文件整体退回 HEAD**，改做小而有据的这一步。
+判据：169 测试 0 失败，ruff 干净。
+
 ## 6. 尚未验证 / still to verify after deployment
 - Nesting the *success* payloads of the meta endpoints under `data` (the error
   replies are flat since 1.0.12; `/v1/profiles` and friends still answer with

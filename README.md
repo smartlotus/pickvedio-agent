@@ -56,14 +56,14 @@ logged-in browser.
 ```bash
 bash bootstrap.sh                # 建 venv + 装依赖 + 离线自检，最后一行应是 verdict: READY
 python3 -m pip install -e '.[dev]'   # 手动等价做法（在仓库目录里）
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.13"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.14"
                                     # 不在仓库里时的安装法。注意：这个名字没有发到 PyPI，
                                     # `pip install pickvedio-core` 会报 No matching
                                     # distribution found —— 必须带 git+ 地址
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.13/pickvedio_core-1.0.13-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.14/pickvedio_core-1.0.14-py3-none-any.whl"
                                     # 机器上没有 git 时的等价做法：直接装 Release 附件，
                                     # 匿名可下载。Release 作业每次发版都按当时的 tag 把
-                                    # 这条形状的命令真跑一遍（v1.0.13 已实测通过；1.0.4 时
+                                    # 这条形状的命令真跑一遍（v1.0.14 已实测通过；1.0.4 时
                                     # 是手工实测）。这台机若连 github.com 都超时，见下面那段
 
 pvc check                        # 离线自检，不联网、不调用模型

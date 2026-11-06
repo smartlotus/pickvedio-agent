@@ -165,7 +165,12 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
                 cancel_flags.pop(job_id, None)
 
         workers.submit(work)
-        return {"job_id": job_id, "status": "queued", "style": style,
+        # `ok`/`code` first: these two POSTs are the ones that start work, and
+        # they used to answer with `job_id`, `status`, `style` and `message` but
+        # no verdict at all -- so the reply an agent most needed to branch on
+        # (`queued`, therefore poll) was the only one without a branch field.
+        return {"ok": True, "code": "queued",
+                "job_id": job_id, "status": "queued", "style": style,
                 "message": "任务已开始。请轮询 GET /v1/jobs/{job_id}，完成后取 "
                            "GET /v1/jobs/{job_id}/report。"}
 
@@ -176,7 +181,8 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
             dedup_minutes=0 if relay_payload is not None else dedup_minutes,
         )
         if record.report:
-            return {"job_id": record.id, "status": "completed", "reused": True,
+            return {"ok": True, "code": "ok",
+                    "job_id": record.id, "status": "completed", "reused": True,
                     "message": record.message, "report": record.report}
         result = launch(record.id, url, style, relay_payload=relay_payload, relay_meta=relay_meta)
         if relay_payload is not None:
@@ -235,6 +241,10 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
         """Unauthenticated liveness probe, also the deploy-verification target."""
         return {
             "ok": True,
+            # `code` too, so "every reply carries a verdict" has no exception to
+            # remember: a liveness probe that answers in a different shape is how
+            # a caller ends up with two parsing paths.
+            "code": "ok",
             "service": "pickvedio-core",
             "version": __version__,
             "uptime_seconds": round(time.time() - running["started_at"], 1),
