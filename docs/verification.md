@@ -1221,6 +1221,22 @@ $ pvc fetch … --allow-sparse                              rc=1（同上）
 仍未验证：同一页面在登录状态下能拿到字幕轨道（这台机的浏览器会话是匿名）。也就是
 说回传通道的**失败半**已经在真数据上验过，**成功半**还没验过。
 
+发布件本身的核验（1.0.17）：tier-5 的措辞修正落在 v1.0.16 的 tag 之后，所以那次
+发布的 skill 包里"tier 3 有免 key 分支、tier 5 却还写着正文取 data.summary"——正是
+我这一路在修的那类缺陷。为此单独出了 1.0.17，并把发布件本身取回来核：
+
+```
+video-summary-skill-1.0.17.zip  sha256 与 REST digest 相等
+包内 video-summary/SKILL.md     与 main 上的同文件（按 LF 归一）逐字节相同
+                                 含 "keyless route" / "no model call" /
+                                 "fetch --url … --transcript relay.json --out segments.json"
+pickvedio_core-1.0.17-py3-none-any.whl  sha256 与 REST digest 相等
+CI @9152bf6：14 个作业全绿，唯一非 success 是被有意跳过的 PyPI 发布（vars.PYPI_PUBLISH
+未设，是否开启动用归用户决定，我不擅自改）
+```
+
+比较按 LF 归一而不是原始字节：这台机 `core.autocrlf=true`，工作区副本可能是 CRLF。
+
 
 - Nesting the *success* payloads of the meta endpoints under `data` (the error
   replies are flat since 1.0.12; `/v1/profiles` and friends still answer with
