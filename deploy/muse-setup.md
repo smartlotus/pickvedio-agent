@@ -87,8 +87,10 @@ https://github.com/smartlotus/pickvedio-agent
       "不可播/会员专享，停下别绕"这三种完全不同的去向。
       绝对不许改用视频简介、标题、评论或搜索结果来凑一份"总结"。
 
-4. 输出给我时正文就是 data.summary（手机对话用 --style brief 的短版），
-   并且必须带一行出处：字幕来自哪一层（source）、可信度、段数、用了哪个模型；
+4. 输出给我时正文：走了 push/服务的就是 data.summary（手机对话用 --style brief 的
+   短版）；走了 3.c 无 key 分支的就是你自己写的那份。两种都必须带一行出处：字幕来自
+   哪一层（source）、可信度、段数、时长；有模型就写模型名，无模型那一栏照实写
+   "总结由你自己撰写，未调用任何模型"，不要把 pipeline 的字段假装有值。
    data.warnings 非空时把它们也念出来。长视频先用
    `pvc push --url "<规范链接>" --transcript relay.json --estimate-only`
    把切块数与"至少几次模型调用"报给我，我点头之后再真正总结；

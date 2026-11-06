@@ -144,7 +144,10 @@ Follow in order, stop at the first tier that yields real speech text. 逐级降�
 5. **Emit.** Deliver the Chinese summary itself, then one provenance line: title,
    duration, `data.source` + `data.confidence`, segment/character count, model,
    token usage, and any `data.warnings`. Save `data.report_markdown` as a file
-   and attach it when the user asked for a document.
+   and attach it when the user asked for a document. On the keyless branch there
+   is no model, no token usage and no `report_markdown`: give the same line with
+   the fields that do exist and state that you wrote the summary yourself. Never
+   leave a pipeline field looking populated when nothing filled it.
 6. **Honest failure.** If every tier is empty, report `code`, `message`, the
    extraction `reason`, and the two things that could work: a logged-in session
    for the relay tier, or ASR (`PVC_ASR_PROVIDER`, costs money, needs consent).

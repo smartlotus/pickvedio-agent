@@ -102,9 +102,13 @@ Do these in order, and show me the raw command and the raw output of every step:
       Never substitute the video description, title, comments or search results for a
       "summary".
 
-4. When you answer me, the body is data.summary (the short --style brief version for a
-   phone chat), plus one provenance line: which caption tier it came from (source),
-   confidence, segment count, which model. Read out data.warnings if it is non-empty.
+4. When you answer me, the body is data.summary when you went through push/a service
+   (the short --style brief version for a phone chat), or your own write-up when you took
+   the keyless branch in 3.c. Either way include one provenance line: which caption tier
+   it came from (source), confidence, segment count, duration. If a model ran, name it;
+   if none did, say "summary written by the agent, no model call" -- do not present a
+   pipeline field as if it had a value.
+   Read out data.warnings if it is non-empty.
    For a long video, run
    `.venv/bin/pvc push --url "<canonical link>" --transcript relay.json --estimate-only`
    first and tell me the chunk count and the minimum number of model calls; only
