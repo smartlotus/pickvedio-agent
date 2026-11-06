@@ -250,7 +250,9 @@ def resolve(
     remedy = [
         "1) 在已登录的浏览器里打开该视频页，执行 "
         "skills/video-summary/assets/browser-extract.js 取得字幕 JSON，"
-        "然后 `pvc push --url <链接> --transcript relay.json --summarize`；",
+        "然后 `pvc push --url <链接> --transcript relay.json --title <标题> "
+        "--duration <秒> --style brief`（push 没有 --summarize 这个开关；"
+        "它建的就是总结任务，长视频再 `pvc job wait --id <job_id>`）；",
         "2) 配置 PVC_BILIBILI_SESSDATA 或 PVC_COOKIE_FILE（Netscape 格式）后重试；",
     ]
     if asr_reason:

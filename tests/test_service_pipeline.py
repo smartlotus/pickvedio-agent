@@ -357,6 +357,92 @@ def test_cli_resolve_declares_a_short_link_instead_of_an_unexplained_empty_id(se
     assert "hint" not in direct["data"]
 
 
+def _pvc_flag_index():
+    """Map each `pvc` subcommand to the options it really accepts."""
+    import argparse
+
+    from pvc.cli import build_parser
+
+    parser = build_parser()
+    # `_SubParsersAction`, not "any action with choices": `--format` also has
+    # choices, and they are a list, which is what the first draft of this
+    # helper tripped over.
+    action = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    index = {"": {o for item in parser._actions for o in item.option_strings if o.startswith("--")}}
+
+    def collect(sub, path):
+        names = {o for item in sub._actions for o in item.option_strings if o.startswith("--")}
+        index[path] = names | index[""]
+        for nested in (a for a in sub._actions if isinstance(a, argparse._SubParsersAction)):
+            for name, child in nested.choices.items():
+                collect(child, f"{path} {name}".strip())
+
+    for name, sub in action.choices.items():
+        if hasattr(sub, "_actions"):
+            collect(sub, name)
+    return index
+
+
+def test_no_hint_or_doc_invents_a_pvc_flag():
+    """The `needs_browser` hint is the most-read line in this product.
+
+    It told every agent to run `pvc push ... --summarize`. `push` has no such
+    option: argparse exits 2, and the agent reports a broken tool instead of
+    following the ladder. Every command line written in the source, the skill
+    pack or the docs is now checked against the real parser, and the checker
+    must still catch a planted fake flag.
+    """
+    import re
+    from pathlib import Path
+
+    index = _pvc_flag_index()
+    root = Path(__file__).resolve().parents[1]
+    pattern = re.compile(
+        r"pvc (job (?:create|status|wait|list)|push|fetch|summarize|resolve|status|profiles|models|serve|check)\b"
+        r"([^`\n]*)"
+    )
+    bad = []
+    checked = 0
+    root_dirs = [(root / "src", "*.py"), (root / "skills", "*.md"), (root / "docs", "*.md"),
+                 (root / "deploy", "*.md"), (root / "prompts", "*.md")]
+    files = [root / "README.md", root / "AGENTS.md"]
+    for directory, suffix in root_dirs:
+        # rglob, not glob: `skills/video-summary/SKILL.md` is two levels deep, and
+        # the first draft of this scan silently read almost nothing -- which is
+        # exactly what the `checked >= 20` assertion below is there to catch.
+        files.extend(sorted(directory.rglob(suffix)))
+    for path in files:
+        if not path.is_file() or "build" in path.parts or "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for number, line in enumerate(text.splitlines(), start=1):
+            for match in pattern.finditer(line):
+                command, tail = match.group(1), match.group(2)
+                flags = re.findall(r"(--[a-z][a-z0-9-]*)", tail)
+                if not flags:
+                    continue
+                checked += len(flags)
+                # `pvc job create|status|wait|list` is one parser with a
+                # positional action, not nested subparsers, so validate the
+                # whole "job wait" phrase against the "job" entry.
+                allowed = index.get(command)
+                if allowed is None and command.startswith("job "):
+                    allowed = index.get("job", set())
+                allowed = allowed or set()
+                for flag in flags:
+                    if flag not in allowed:
+                        bad.append(f"{path.relative_to(root)}:{number}: pvc {command} {flag}")
+
+    planted = "pvc push --url <链接> --transcript relay.json --summarize"
+    planted_match = pattern.search(planted)
+    assert planted_match, "the scanner no longer matches its own probe"
+    planted_flags = re.findall(r"(--[a-z][a-z0-9-]*)", planted_match.group(2))
+    assert "--summarize" in planted_flags and "--summarize" not in index["push"], "probe lost its teeth"
+
+    assert checked >= 60, f"only {checked} flags checked; the scanner is probably matching nothing"
+    assert not bad, f"invented pvc flags: {bad}"
+
+
 def test_package_version_literal_matches_pyproject():
     """Two hand-edited version strings must not be able to disagree.
 

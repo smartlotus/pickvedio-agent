@@ -1,7 +1,9 @@
 """Transcript source channels.
 
 ``ladder.resolve`` is the only entry point callers should use; the individual
-modules are exposed for tests and for ``pvc fetch --channel`` diagnostics.
+modules are exposed for tests. ``pvc fetch`` walks the whole ladder -- there is
+no flag to pin it to one channel, and `describe_channels` (what ``pvc status``
+shows) is how a caller learns which rungs this deployment can use right now.
 """
 from __future__ import annotations
 
