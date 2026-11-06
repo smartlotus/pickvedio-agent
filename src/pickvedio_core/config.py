@@ -89,18 +89,36 @@ class LLMSettings:
     @classmethod
     def from_env(cls, seed: dict[str, Any] | None = None) -> LLMSettings:
         seed = seed or {}
-        provider = _env("PVC_LLM_PROVIDER", "PVC_PROVIDER", default="") or str(
-            seed.get("provider") or "deepseek"
+        # The desktop app keeps its local-Ollama choice (`provider=ollama`,
+        # base_url=http://127.0.0.1:11434/v1, model=gemma4:e4b) in the same
+        # summary block it uses for prompts, so a leftover file from the desktop
+        # app used to decide the transport of this library too. Both measured
+        # forms of that were real failures: PVC_LLM_PROVIDER=deepseek reported
+        # model=gemma4:e4b, and a smoke test of the release wheel that set only
+        # PVC_LLM_BASE_URL / PVC_LLM_API_KEY / PVC_LLM_MODEL went out to Ollama
+        # anyway, because the seed still chose the provider.
+        #
+        # Rule now: the seed speaks about the summariser only when the
+        # environment says nothing about it. Prompts, chunk size and profile
+        # keep seeding exactly as before -- those are not endpoints.
+        env_provider = _env("PVC_LLM_PROVIDER", "PVC_PROVIDER", default="")
+        remote_configured = any(
+            _env(name)
+            for name in (
+                "PVC_LLM_BASE_URL",
+                "PVC_LLM_MODEL",
+                "PVC_LLM_API_KEY",
+                "PVC_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "OPENAI_API_KEY",
+            )
+        )
+        seed_speaks = not env_provider and not remote_configured
+        provider = env_provider or (
+            str(seed.get("provider") or "deepseek") if seed_speaks else "deepseek"
         )
         preset = PROVIDER_PRESETS.get(provider.lower(), {})
-        # A seeded base_url / api_key / model belongs to the provider that wrote
-        # them. The desktop app keeps its local-Ollama choice in this very block
-        # (`gemma4:e4b` on 127.0.0.1:11434), so honouring it under
-        # PVC_LLM_PROVIDER=deepseek sent a DeepSeek-branded request to a local
-        # Ollama URL for a model that endpoint never heard of -- and
-        # `pvc status` cheerfully reported provider=deepseek, model=gemma4:e4b.
-        # The seed only counts as a transport source when the provider agrees.
-        transport = seed if str(seed.get("provider") or "").strip().lower() == provider.strip().lower() else {}
+        transport = seed if seed_speaks else {}
         return cls(
             provider=provider,
             base_url=_env("PVC_LLM_BASE_URL", default="")
@@ -146,7 +164,27 @@ class OllamaSettings:
         stage. Provider "ollama" is only meaningful to the app's own transport.
         """
         seed = seed or {}
-        chose_ollama = str(seed.get("provider") or "").strip().lower() in {"ollama", "local"}
+        # Same rule as LLMSettings.from_env: a seeded local model only counts
+        # while the environment says nothing about a remote summariser, so
+        # configuring PVC_LLM_BASE_URL/PVC_LLM_API_KEY/PVC_LLM_MODEL stops a
+        # leftover desktop file from keeping Ollama "enabled" underneath.
+        remote_configured = any(
+            _env(name)
+            for name in (
+                "PVC_LLM_PROVIDER",
+                "PVC_PROVIDER",
+                "PVC_LLM_BASE_URL",
+                "PVC_LLM_MODEL",
+                "PVC_LLM_API_KEY",
+                "PVC_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "OPENAI_API_KEY",
+            )
+        )
+        chose_ollama = (not remote_configured) and str(seed.get("provider") or "").strip().lower() in {
+            "ollama",
+            "local",
+        }
         return cls(
             url=_env("PVC_OLLAMA_URL", default="") or str(seed.get("ollama_url") or "")
             or "http://127.0.0.1:11434",

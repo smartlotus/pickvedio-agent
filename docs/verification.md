@@ -363,8 +363,31 @@ curl -L .../releases/download/v1.0.0/pickvedio_core-1.0.0-py3-none-any.whl -> 20
 （`enabled = bool(model)`）。也就是说这两个字段在"本地 Ollama 可用"与"远程 key 已配"之间
 本来就是同一个布尔，读的人容易误会；要区分就看 `pvc status` 的 `missing` 数组。
 
-## 6. 尚未验证 / still to verify after deployment
+### 同一处泄漏的第二种形态（用发布件跑端到端时撞上）
 
+第一次修复只挡住了 `base_url`/`model` 的跨 provider 污染。用 v1.0.0 的 wheel 做端到端时，
+我只设了 `PVC_LLM_BASE_URL`/`PVC_LLM_API_KEY`/`PVC_LLM_MODEL`（**没有**设 `PVC_LLM_PROVIDER`），
+任务直接失败：`无法连接 Ollama`。原因在 `LLMSettings.from_env` 的第一行取值——
+provider 本身也是"env 没有就读 seed"，于是 seed 的 `ollama` 把整个通道选走了，
+而 `build_client` 又因为 `ollama.enabled` 命中本地分支。
+
+现在的规则收成一句话：**环境里对 LLM 有任何表态（provider/base_url/model/api_key 之一），
+seed 就不再对总结器说话**；提示词、`chunk_chars`、`profile` 照旧从 seed 延续。
+`OllamaSettings` 用同一个判据，避免"文件让 Ollama 恒为 enabled"。
+
+两条端到端实测（本机，零网络零花费：桩模型在 127.0.0.1:8931，字幕走 relay 回传）：
+
+| 场景 | 代码 | 是否显式给 provider | 结果 |
+| --- | --- | --- | --- |
+| A | v1.0.0 发布件 wheel（`pip install .whl[service]`） | 是 | `ok=true`，job 09003989…，`usage.llm_calls=2`（chunk 1 + final 1），摘要为桩文本 |
+| B | 当前 checkout（含本次修复） | **否** | `ok=true`，job aa3bfc8d…，`usage.llm_calls=2`，同样的桩摘要 |
+
+A 证明"只用公开下载件、不装 git、不 clone"也能走完 链接→回传字幕→建任务→分段→总结→报告；
+B 证明修复确实把"没设 provider 但设了远程端点"这一形态从 Ollama 手里拿回来了。
+服务鉴权门禁同时复验：不带令牌 POST `/v1/jobs` → 401。
+三个测试进程用完即杀，端口 8931-8933 复查为 0 监听。
+
+## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
 - Muse's browser actually running `browser-extract.js` on a logged-in page.

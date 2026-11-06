@@ -575,13 +575,57 @@ def test_desktop_seed_still_drives_the_local_ollama_path(monkeypatch):
     """The fix must not break the case the seed exists for."""
     from pickvedio_core.config import LLMSettings, OllamaSettings
 
-    for name in ("PVC_LLM_PROVIDER", "PVC_PROVIDER", "PVC_LLM_BASE_URL", "PVC_LLM_MODEL", "PVC_OLLAMA_MODEL"):
+    for name in (
+        "PVC_LLM_PROVIDER",
+        "PVC_PROVIDER",
+        "PVC_LLM_BASE_URL",
+        "PVC_LLM_MODEL",
+        "PVC_LLM_API_KEY",
+        "PVC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+        "PVC_OLLAMA_MODEL",
+    ):
         monkeypatch.delenv(name, raising=False)
     llm = LLMSettings.from_env(DESKTOP_SUMMARY_SEED)
     assert llm.provider == "ollama"
     assert llm.base_url == "http://127.0.0.1:11434/v1"
     assert llm.model == "gemma4:e4b"
     assert OllamaSettings.from_env(DESKTOP_SUMMARY_SEED).enabled is True
+
+
+def test_explicit_remote_config_outranks_a_leftover_desktop_seed(monkeypatch):
+    """Configuring a remote endpoint is a statement of intent, provider included.
+
+    Measured while smoke-testing the release wheel: only PVC_LLM_BASE_URL,
+    PVC_LLM_API_KEY and PVC_LLM_MODEL were set, PVC_LLM_PROVIDER was not, and
+    the summary still went to Ollama because the seed chose the provider.
+    """
+    from pickvedio_core.config import OllamaSettings
+    from pickvedio_core.llm import OpenAICompatibleClient, build_client
+
+    for name in (
+        "PVC_LLM_PROVIDER",
+        "PVC_PROVIDER",
+        "PVC_LLM_API_KEY",
+        "PVC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+        "PVC_OLLAMA_MODEL",
+        "PVC_LLM_BASE_URL",
+        "PVC_LLM_MODEL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PVC_LLM_BASE_URL", "http://127.0.0.1:8931/v1")
+    monkeypatch.setenv("PVC_LLM_API_KEY", "stub-key-not-a-secret")
+    monkeypatch.setenv("PVC_LLM_MODEL", "stub-mini")
+
+    settings = Settings.load()
+    assert settings.llm.provider == "deepseek", settings.llm.provider
+    assert settings.llm.base_url == "http://127.0.0.1:8931/v1"
+    assert settings.llm.model == "stub-mini"
+    assert OllamaSettings.from_env(DESKTOP_SUMMARY_SEED).enabled is False
+    assert isinstance(build_client(settings), OpenAICompatibleClient)
 
 
 def test_settings_load_survives_a_home_directory_that_cannot_be_resolved(tmp_path, monkeypatch):
