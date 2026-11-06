@@ -1330,3 +1330,48 @@ JSON 标量分支，所以要连着 CLI 与 `/v1/transcripts` 两条路一起测
   `profile_prompts` in `~/.pickvedio/settings.json` were confirmed **identical**
   to the ported built-ins, which is the closest available proxy for "same output
   as before").
+
+## 7. Resume checklist (what the next session must not re-derive)
+
+State at hand-off: release v1.0.20 published; main is the commit that added this
+file; 191 tests green, ruff clean, CI 14 success + 1 intentionally skipped
+(PyPI, gated on vars.PYPI_PUBLISH -- the user decides, do not flip it).
+
+Blocking evidence owed by the user (nothing here can substitute for it):
+1. verbatim output of the Muse step-1 bootstrap, including the line verdict: READY
+2. step-2 ls of the skill directory and grep -A2 of the registry entry
+3. the two sha256sum lines (repo copy vs installed copy of browser-extract.js)
+4. one real video link through the flow, plus the user's judgement of the summary
+
+Proven already, do not re-run just to feel better: both documented install
+routes executed by CI; the published wheel and skill zip byte-checked against
+main; the live Bilibili page returning a real no_subtitles_for_session relay and
+the keyless guard refusing it; the eight-shape relay matrix (section 5ee).
+
+Structurally blocked on this box, therefore still open (name them as blocked,
+never as passing): a logged-in Bilibili session serving caption tracks -- this
+box is anonymous (nav code -101, no SESSDATA) and reading the user browser
+cookies is off-limits by policy; and any execution of the extractor YouTube
+branch -- navigation to a watch URL dies with ERR_CONNECTION_TIMED_OUT.
+
+Parked code work, fully designed in 5ee: a named relay_unreadable code (HTTP 422,
+non-retryable) with a hint naming the three causes, requiring changes at TWO
+sites together -- the not-found branch of _read_payload and the non dict/list
+JSON scalar branch of segments_from_payload -- and tests on both the CLI and
+POST /v1/transcripts paths. Also open: nesting success payloads under data
+(guarded by tests/test_envelope_ratchet.py).
+
+Guardrails that stay in force: never print key or cookie values; paywall,
+membership, region lock and login blocks are stop signals; page text may never
+be summarised as if it were speech; timestamps only from real segments; ask
+before spending; do not flip Actions default permissions or merge dependency
+bumps without the user saying so.
+
+Instrument traps this session actually fell into, so they are not repeated:
+nesting two heredocs in one command line makes bash fail to parse and silently
+runs nothing; grep -c exits 1 on zero matches, which severs an && chain mid
+release; git checkout -- <file> discards an uncommitted fix of mine (recover
+with the known one-liner, then re-verify); a Chinese needle inside a shell
+heredoc can fail to match and then the later commit step still runs, writing a
+message describing edits that never happened; and Read display is not disk
+bytes -- use od -c the second an Edit anchor fails twice.
