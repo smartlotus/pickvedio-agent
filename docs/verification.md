@@ -1173,7 +1173,55 @@ wheel 字节 sha256 `0cf4aee4…` 与 REST `digest` 相等）：
 （探针第一次跑失败是因为我把 `[service]` 装漏了，`ModuleNotFoundError: fastapi`
 ——那是探针的错，不是产品的错，重装后同一判据立刻绿。）
 
-## 6. 尚未验证 / still to verify after deployment
+## 5cc. 无 key 的那条路终于有了门禁（1.0.16）
+
+背景：Muse VM 一般不会拿到 `PVC_LLM_API_KEY`，而那台机器上唯一能用的通道就是浏览器
+回传。问题在于——能读 `relay.json` 的两条命令（`push`、带服务的 `summarize`）都会去
+"总结"，所以没有 key 的 agent 只剩一个选择：自己打开 relay.json，看到什么就写什么。
+这条路完全绕过了 sparse/empty 门禁，也就是说 1.0.9 起立的那条硬规则（内容太稀就拒，
+不许拿简介冒充讲话）恰好在最可能的部署形态上失效了。
+
+改动：`pvc fetch --url U --transcript F [--out S] [--allow-sparse]`，走同一个
+`to_transcript` 校验，不联网、不调模型；同时给 `--service` 会在任何 POST 之前拒绝，
+因为 `POST /v1/transcripts` 一提交就开始花钱。
+
+判据（tests/test_fetch_relay.py，6 条，全绿；178 passed / ruff clean）：
+
+- "不调用模型"是可判红的：monkeypatch 掉 `pipeline.build_client` 与
+  `ladder.resolve`，一旦被碰到就 AssertionError——不是"希望没调用"。
+- `--out` 落盘的字节必须等于 `data.segments`。
+- 稀疏 relay 在这条只读路上也必须 rc=1、`code=sparse_transcript`、`data.hint` 非空，
+  且 data 里不能有 segments（既然拒绝，就不该把正文交出去）。
+- `--allow-sparse` 只放松"拒绝"，不放松"标注"：`data.warnings` 里仍须出现密度那句
+  （relay.py:281）。我最初断言的关键字是"过短"，跑出来是红的——那是**我的量具错，
+  不是产品错**，产品在这条分支写的是"文字密度异常"；改断言，不改文案。
+- `--service` + `--transcript` 时 monkeypatch 掉 `_Remote.request`，任何一次真实请求
+  都会判红。
+
+真页面实测（本机浏览器里一个已经打开的 B 站页面，会话匿名）：
+
+```
+assetBytes 30993   ← 盘上那份 skills/video-summary/assets/browser-extract.js 原样注入并执行
+title "YouTube怎么翻译字幕成中文字幕"   durationSeconds 104
+reason no_subtitles_for_session   trackCount 0   segments 0
+```
+
+把这份**真实**回传对象交给新命令：
+
+```
+$ pvc fetch --url <规范链接> --transcript relay.json      rc=1
+  ok=false  code=empty_transcript  data.keys=['hint']  没有 segments
+  hint="当前会话看不到字幕轨道——B 站的 AI 字幕只对已登录会话下发…"
+$ pvc fetch … --allow-sparse                              rc=1（同上）
+```
+
+要点：`--allow-sparse` 没把"空"放过去。逃生口只放松稀疏判定、不放松空判定——这条
+以前只是代码里的一个分支，现在是实测。
+
+仍未验证：同一页面在登录状态下能拿到字幕轨道（这台机的浏览器会话是匿名）。也就是
+说回传通道的**失败半**已经在真数据上验过，**成功半**还没验过。
+
+
 - Nesting the *success* payloads of the meta endpoints under `data` (the error
   replies are flat since 1.0.12; `/v1/profiles` and friends still answer with
   extra top-level keys). Deliberately left undone: it is a breaking change for
@@ -1182,6 +1230,11 @@ wheel 字节 sha256 `0cf4aee4…` 与 REST `digest` 相等）：
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
 - Muse's browser actually running `browser-extract.js` on a logged-in page.
+  1.0.16 narrowed this one: the shipped asset was executed inside a real
+  Bilibili page here and returned a live `no_subtitles_for_session` relay,
+  which the keyless guard refused with `empty_transcript` (see §5cc). The
+  *logged-in success* half is still unproven, because this box's browser
+  session is anonymous.
 - A real model call producing a summary the user considers good (the prompts are
   ported byte-for-byte from the desktop app, and the desktop app's own stored
   `profile_prompts` in `~/.pickvedio/settings.json` were confirmed **identical**
