@@ -27,7 +27,7 @@ jobs that must outlive the chat.
 就能出总结。ASR 是花钱的可选通道（`PVC_ASR_PROVIDER`），开之前必须明确同意。
 证据见 [../docs/verification.md](../docs/verification.md)。
 
-英文界面的 Muse 会话请用 [../skills/video-summary/references/deploy-runbook.md](../skills/video-summary/references/deploy-runbook.md) 里的英文块，内容一致。
+英文界面的 Muse 会话：路线 1（云电脑本地跑）与路线 2（Railway 托管）的英文块都在 [../skills/video-summary/references/deploy-runbook.md](../skills/video-summary/references/deploy-runbook.md) 的 §1a 与 §1，与本文件内容一致。
 
 ---
 
@@ -66,7 +66,9 @@ https://github.com/smartlotus/pickvedio-agent
    c. 如果返回 code 是 needs_browser 或 needs_auth：打开那个视频页，在页面里执行
       skills/video-summary/assets/browser-extract.js，把它返回的整个对象存成 relay.json，
       然后执行 .venv/bin/pvc push --url "<规范链接>" --transcript relay.json --style brief；
-   d. 如果脚本报 segments=0：把它返回的 reason 和 warnings 原样告诉我，然后停下。
+   d. 如果 push 回来 ok=false：把 data.hint 当成下一步的权威指令照做，并把 code、
+      message、data.hint 原样贴给我。hint 会区分"当前会话没登录"、"这视频根本没字幕"、
+      "不可播/会员专享，停下别绕"这三种完全不同的去向。
       绝对不许改用视频简介、标题、评论或搜索结果来凑一份"总结"。
 
 4. 输出给我时正文就是 data.summary（手机对话用 --style brief 的短版），
@@ -74,7 +76,7 @@ https://github.com/smartlotus/pickvedio-agent
    data.warnings 非空时把它们也念出来。长视频用 pvc job create + pvc job wait，
    不要同步等一个会超时的请求。
 
-5. 任何失败先贴命令、code、message、hint，再说你的判断；同一个错误不要连续重试超过两次。
+5. 任何失败先贴命令、code、message、data.hint，再说你的判断；同一个错误不要连续重试超过两次。
 
 模型 key 我会给你（PVC_LLM_PROVIDER 和 PVC_LLM_API_KEY）。
 你不得在任何回复里打印 key 的值，也不得把它写进仓库文件、日志或提交里。
@@ -133,8 +135,10 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
    默认不需要 ffmpeg：字幕由你的浏览器取，服务器只做分段和总结。
 2. 设置这些环境变量（值我自己给，你不要替我编造，也不要打印出来）：
    PVC_API_TOKEN、PVC_LLM_PROVIDER、PVC_LLM_API_KEY、PVC_LLM_MODEL、
-   PVC_CHUNK_CHARS=18000、PVC_MAX_MINUTES=180、PVC_STYLE=general、
+   PVC_CHUNK_CHARS=9000、PVC_MAX_MINUTES=180、PVC_STYLE=general、
    PVC_KEEP_MEDIA=0、PVC_WORKDIR=/data。
+   （PVC_CHUNK_CHARS 的代码默认是 18000；这里显式写 9000 是因为部分 provider 会把
+     一次 18000 字的补全截断成不可用的 JSON，troubleshooting 里那条 502 就是这个。）
    PVC_ASR_PROVIDER 先留空，等我确认要花钱再开。
 3. 给服务挂一个 Volume，挂载路径 /data（不挂卷的话重新部署会丢掉任务状态）。
 4. 部署完成后把服务域名告诉我，只给域名，不要带任何密钥。

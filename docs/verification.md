@@ -682,6 +682,16 @@ reason 断言 hint 有 4 种，防止退化成一坨常量；
   那是夹具的错，顺带证明稀疏门禁真在读时长。
 - 顺手把两处样式缺陷改在主线：`duration` 那个 `if` 的块多缩进 4 格、一条 137 字长行。
   它们不改行为，所以没为此再发一版；agent 装的是 `@v1.0.5` 固定标签，读不到这个差异。
+- 同一轮还审了**要贴给 Muse 的指令块本身**，纠出三处：
+  ① `deploy/muse-setup.md` 里那句"英文界面的 Muse 会话请用 runbook 的英文块"是指向
+  路线 2 的：runbook 只有 Railway 的英文块，按默认路线（云电脑本地跑）读过去的人会
+  把"部署到 Railway"当"本地装"发出去。现在 runbook §1a 补了一份与中文块逐条对应的
+  路线 1 英文块，指针也改成 §1a（本地）与 §1（Railway）分别对应。
+  ② 两份文档对 `PVC_CHUNK_CHARS` 各写一个数（runbook 9000、muse-setup 18000），而代码
+  默认是 18000。统一到 9000 并写明理由：默认 18000，显式调低是因为部分 provider 会把
+  一次 18000 字的补全截断成不可用 JSON（troubleshooting 表里那条 502 就是它）。
+  ③ 路线 1 第 3.d 步原本只说"把 reason 和 warnings 原样告诉我"，而 §5n 之后 CLI 已经
+  会给出具体去向：改成**以 `data.hint` 为下一步的权威指令**，并列出它区分开的三种结局。
 
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.

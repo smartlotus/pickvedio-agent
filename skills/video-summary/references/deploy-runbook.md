@@ -8,7 +8,7 @@ Everything below is what to tell Muse and what to check afterwards. The service
 code, `Dockerfile`/`Procfile`/`railway.json` and the README are owned by the main
 session; this runbook only drives them.
 
-## 1. The instruction to paste into Muse
+## 1. Route 2 (Railway hosting) — the instruction to paste into Muse
 
 ```text
 用你的 Railway 连接器把这个公开仓库部署成一个 HTTP 服务，仓库里有 FastAPI 应用和
@@ -44,6 +44,53 @@ them. Leave PVC_ASR_PROVIDER unset until I approve paid transcription. Then repo
 service hostname and the raw output of: curl /healthz, curl /openapi.json, pvc status,
 pvc status --service <url>, pvc check. On failure show the command plus code and
 message; at most two retries.
+```
+
+## 1a. Route 1 (the VM itself) — the instruction to paste into an English Muse session
+
+```text
+Do not deploy this to any hosting platform -- install and run it inside your own cloud
+computer. The repo is public:
+https://github.com/smartlotus/pickvedio-agent
+
+Do these in order, and show me the raw command and the raw output of every step:
+
+1. git clone https://github.com/smartlotus/pickvedio-agent
+   cd pickvedio-agent
+   bash bootstrap.sh
+   (It creates ./.venv, installs the package, runs the offline self-test `pvc check`
+    and prints what is still missing. The last line must be "verdict: READY". If it
+    is not, paste the output and stop -- do not improvise another install method.)
+
+2. Install the skill: copy the repo's skills/video-summary/ directory into
+   opt/hatch/skills/video-summary/ and register it as available. Then read SKILL.md
+   once more and follow the ladder it describes for the rest of this session.
+
+3. I will send you a Bilibili or YouTube link. You should:
+   a. run `.venv/bin/pvc resolve --url "<what I sent>"` to get the canonical link;
+   b. run `.venv/bin/pvc fetch --url "<canonical link>"` and try to take captions directly;
+   c. if it answers needs_browser or needs_auth: open the video page in your browser,
+      execute skills/video-summary/assets/browser-extract.js inside the page, save the
+      whole returned object as relay.json, then run
+      `.venv/bin/pvc push --url "<canonical link>" --transcript relay.json --style brief`;
+   d. if that push answers ok=false: treat data.hint as the authoritative next step and
+      follow it, and paste me code, message and data.hint verbatim. The hint separates
+      "this session is not logged in", "this video has no captions at all" and
+      "not playable / members-only -- stop, do not work around it".
+      Never substitute the video description, title, comments or search results for a
+      "summary".
+
+4. When you answer me, the body is data.summary (the short --style brief version for a
+   phone chat), plus one provenance line: which caption tier it came from (source),
+   confidence, segment count, which model. Read out data.warnings if it is non-empty.
+   For a long video use `pvc job create` then `pvc job wait` instead of sitting on a
+   request that will time out.
+
+5. On any failure: show the command, code, message and data.hint before you give me
+   your own judgement, and never retry the same error more than twice in a row.
+
+I will give you the model key myself (PVC_LLM_PROVIDER and PVC_LLM_API_KEY). You must
+never print its value in any reply, and never write it into a repo file, a log or a commit.
 ```
 
 ## 2. Before pasting, prepare the two secrets
