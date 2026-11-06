@@ -52,6 +52,29 @@ jobs:
       - name: ruff check
         run: ruff check .
 
+      - name: The needs_browser hint still names real flags
+        # Deliberately in CI as well as in the test suite. A commit that reverts
+        # the fix and its test at once -- which happened once today, because the
+        # index was left stale by a failed `rebase --autostash` -- goes green
+        # without this, since a deleted test asserts nothing. The pattern is the
+        # exact bogus command shape, not the word, so the source can still
+        # explain that --summarize does not exist.
+        run: |
+          PATTERN='--transcript relay.json --summarize'
+          # docs/verification.md is exempt: it is the ledger that quotes broken
+          # commands on purpose to record what was wrong.
+          if grep -rq --exclude=verification.md -- "$PATTERN" src skills deploy docs README.md AGENTS.md; then
+            echo "::error::a shipped instruction tells the reader to run pvc push --summarize, which does not exist"
+            grep -rn --exclude=verification.md -- "$PATTERN" src skills deploy || true
+            exit 1
+          fi
+          echo "no shipped instruction cites the invented flag"
+          # The gate has to be able to go red: the same grep against the ledger,
+          # where the string is quoted deliberately, must find it.
+          grep -rq -- "$PATTERN" docs/verification.md || {
+            echo "::error::the negative control lost its fixture"; exit 1; }
+          echo "negative control OK: the pattern is still detectable where it is quoted"
+
       - name: ruff format --check
         # Formatting is advisory until the codebase settles; keep it visible but
         # do not let a reformat block a deploy-critical fix.
