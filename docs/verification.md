@@ -947,6 +947,14 @@ Anaconda 自带 PyYAML，而 Test 作业只装 `.[dev]`。这是本轮第二次�
 - 运行时快照仓库：https://github.com/win4r/MuseAI-Skills
 - IT之家对同一导出的报道（约 68 个技能目录）：https://m.10jqka.com.cn/20260925/c680281420.shtml
 
+发布后回到那个真正会被解包的产物上核：`video-summary-skill-1.0.10.zip`
+（39188 B，sha256 `84c4af95…` 与 REST `digest` 相等），7 个条目里
+**相对路径 0 处、绝对 `/opt/hatch/skills` 6 处**；
+`references/deploy-runbook.md` 同时含 `/home/hatch/config/skills.yaml`、
+`video_summary` 键与 `@v1.0.10`；`SKILL.md` 不带安装路径（它讲运行时行为，
+安装归 runbook），`manifest.yaml` 的 connector 名仍是下划线 `video_summary`。
+CI 8 个作业与 Release 都在 `1a7991f` 上绿。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
