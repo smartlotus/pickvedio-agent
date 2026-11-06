@@ -1054,7 +1054,29 @@ AttributeError 才把真问题露出来——`build_client` 的规则是"Ollama 
 `data.hint`，于是 `KeyError: 'data'`——成功回复的顶层键本来就不受这次改动影响。
 161 测试 0 失败，ruff 干净。
 
+发布件复测（干净 venv 装 `pickvedio_core-1.0.12-py3-none-any.whl`，字节与
+REST `digest` `ac0b43a6…` 相等，起真实 `pvc serve` 打真 HTTP）：
+`401 unauthorized`（`data.hint` 在位）、`400 configuration`、
+`422 empty_transcript`（`data.hint`）、`422 invalid_request`
+（`data.detail` 保留框架逐字段错误）、`404 job_not_found`——
+六种回复**没有一个**带顶层 `detail`；规范侧 `schemes=[BearerAuth]`，
+`/v1` 十个操作缺 401 的数量 0、缺 503 的数量 0，report 的响应集含 409。
+（顺手清掉一个探针崩溃后残留的 `pvc serve`：按 PID 的命令行自证是我起的，
+杀掉后计数归 0。）
+
+同时测出一处**这次没改**的不一致，记成待办而不是掩盖它：
+`GET /v1/profiles` 的 200 回复把 `profiles` / `labels` / `default` 直接放在**顶层**，
+而不是像 CLI 那样放进 `data`。错误路径这次统一了，成功路径还没有；
+把它们收进 `data` 是一次有意的破坏性 API 变更（老读者按顶层键取），
+需要单独定版本、改文档、并在 SKILL 的信封一节写清"成功回复也在 data 里"，
+不适合夹在这次修复里顺手做。
+
 ## 6. 尚未验证 / still to verify after deployment
+- Nesting the *success* payloads of the meta endpoints under `data` (the error
+  replies are flat since 1.0.12; `/v1/profiles` and friends still answer with
+  extra top-level keys). Deliberately left undone: it is a breaking change for
+  readers that index those keys today, so it needs its own release and a rewrite
+  of the envelope section, not a drive-by during a bug fix.
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
 - Muse's browser actually running `browser-extract.js` on a logged-in page.
