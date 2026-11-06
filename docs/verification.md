@@ -650,6 +650,39 @@ reason 断言 hint 有 4 种，防止退化成一坨常量；
 
 1.0.5 是为了让**装到 agent 机器上的那个 wheel** 也带上这两处行为。
 
+### 5o. 1.0.5 发出去之后才验的事（含 Dependabot 抢在我前面合并）
+
+- 推 main 之前发现远端 main 已经不是我的父提交：PR #1（actions 组 8 个 bump，
+  checkout v4→v7、setup-python v5→v7、upload-artifact v4→v7、download-artifact v4→v8）
+  在 17:26:37Z 被合并——不是我合的（此前明确把这一票留给用户点头）。处理顺序是
+  先 `gh api repos/…/commits/<sha>` 看清它只碰三个 workflow 文件，再用 SSH-443
+  把对象取回来，`git rebase --onto` 把我的提交接上去，`git diff 7ff9316 1b89f33`
+  证明差异只有那三个 workflow，最后才移动分支。
+- 这批 bump 不是"版本号变新"就算数：合并提交自己在远端已经跑过 CI 与 Docker image
+  且都 success，说明 v7/v8 真能解析；我的 1.0.5 是在这个已证的基础上再跑一遍。
+- Release 这一轮**没有** 403：build 与 Publish the GitHub Release 都 success，
+  PyPI job 因 `vars.PYPI_PUBLISH` 未开而 skipped（预期）。三个资产齐：wheel 105549 B、
+  sdist 121723 B、skill zip 35325 B，`targetCommitish` 直接等于我的提交。
+  §5e 里那三条对 403 的归因都被这轮否证，仍然只当观察记录，不写成因。
+- 取资产的通道在这台机变了：`…/releases/download/…` 又是
+  `curl: (56) Recv failure: Connection was reset`，但
+  `gh api -H 'Accept: application/octet-stream' repos/…/releases/assets/<id>` 通，
+  而且 REST 的 `digest` 字段就是 sha256，落盘后 `sha256sum` 与之逐字节相等
+  （`d894c183cbf48c03…`）。以后在这台机核发布资产走这条。
+- 干净 venv 里装**发布件**（不是 checkout）后测得：version=1.0.5、wheel 内
+  `RELAY_REASON_HINTS` 19 条在场；把 §5n 那个真实空回传对象喂 `pvc push` 得到
+  `ok=false` / `code=empty_transcript` / `data.hint` 91 字且含"登录"、message 里
+  带着 `reason=no_subtitles_for_session` 与提取器的警告，且 hint 不是通用兜底那句；
+  文本形态的 payload 读出 title、duration=104.0、source=up_subtitles、6 段，
+  不再误报"未声明字幕来源类型"，且同一对象以 dict 传入结果逐字段相同。
+- 两处我自己造成的假信号：① 验证脚本第一版按行 `startswith("{")` 解析 envelope，
+  而 `pvc` 打的是缩进 JSON，于是 `data` 恒空，差点把"发布件没带 hint"写成结论；
+  改成整段 `json.loads(stdout)` 才是真结果。② 夹具把第 6 段放在 start=120，
+  被 `normalise` 的 `start > duration + 5` 丢掉（104+5<120），少了 1 段——
+  那是夹具的错，顺带证明稀疏门禁真在读时长。
+- 顺手把两处样式缺陷改在主线：`duration` 那个 `if` 的块多缩进 4 格、一条 137 字长行。
+  它们不改行为，所以没为此再发一版；agent 装的是 `@v1.0.5` 固定标签，读不到这个差异。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

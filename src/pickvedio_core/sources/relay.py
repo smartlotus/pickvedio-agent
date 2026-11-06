@@ -202,11 +202,11 @@ def to_transcript(
             except ValueError:
                 document = payload
     if duration is None and isinstance(document, dict):
-            raw = document.get("duration") or document.get("durationSeconds")
-            try:
-                duration = float(raw) if raw not in (None, "") else None
-            except (TypeError, ValueError):
-                duration = None
+        raw = document.get("duration") or document.get("durationSeconds")
+        try:
+            duration = float(raw) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            duration = None
     if not title and isinstance(document, dict):
         title = str(document.get("title") or "")
     if not language and isinstance(document, dict):
@@ -227,7 +227,11 @@ def to_transcript(
         # "this video is not playable -- stop". Dropping it turned every empty
         # relay into the same generic complaint and made the agent guess.
         reason = str(document.get("reason") or "") if isinstance(document, dict) else ""
-        relay_warnings = [str(item) for item in ((document.get("warnings") or []) if isinstance(document, dict) else []) if item]
+        relay_warnings = [
+            str(item)
+            for item in ((document.get("warnings") or []) if isinstance(document, dict) else [])
+            if item
+        ]
         detail = f"提取器给出 reason={reason}" if reason else "提交内容里没有 reason 字段，无法判断是哪一层空的"
         message = (
             "回传内容里没有可用的文字（0 段）。" + detail
