@@ -47,6 +47,11 @@ dev = [
     "yt-dlp>=2025.1.0",
     "fastapi>=0.110,<1",
     "uvicorn>=0.27,<1",
+    # Tests that read the Muse skill pack need a real YAML loader (the eval
+    # scenarios use anchors, so regex parsing would not resolve them). This was
+    # invisible locally because Anaconda ships PyYAML; CI's Test job failed on
+    # `No module named 'yaml'` -- see docs/verification.md 5t.
+    "PyYAML>=6",
 ]
 
 [project.scripts]

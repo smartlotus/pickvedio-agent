@@ -818,6 +818,36 @@ Muse 装的从来不是仓库源码，而是 release 里那个 `video-summary-sk
 1.0.8 带这些改动，是因为它们改变的是 **agent 看到的 `code` 与 `data`**，
 而不只是文档措辞。
 
+### 5t. 1.0.8 的发布件核验，以及一次"本地绿、CI 红"是我自己带的依赖
+
+发布件核验（干净 venv 装 `pickvedio_core-1.0.8-py3-none-any.whl`，字节先与 REST
+`digest` 对上 `ebdb3de9…`）：
+
+- `version=1.0.8`；桩到 429 的模型调用最终以 `code=rate_limited` 抛出，
+  `retry_after_seconds=120`、hint 里点名等 120 秒，日志显示四档退避仍然照跑
+  （`llm retry 1..4 status=429`）——只改最终标签，不改重试强度；
+- `Retry-After: Wed, 21 Oct 2026 …` 这种 HTTP-date 不猜秒数（`retry_after=None`）；
+  500 依旧 `UpstreamModelError` 且不是 `RateLimited`；
+- 走真实 `cli.main(['push', …])`：`ok=false / code=rate_limited`、
+  `data=[hint, retry_after_seconds]`、顶层没有 `hint`、退出码 1；
+- §5n 那条空回传在这个 wheel 里仍然给含"登录"的具体 hint（没被这次改动顶掉）；
+- 拆 `video-summary-skill-1.0.8.zip`：锚点声明与引用各 1 次、夹具里 hint 都在
+  `data` 内、旧的顶层 hint 形状已不存在、`required_behaviour` 出现 `data.hint` 5 次、
+  `SKILL.md` 第 10 条同时提到 `data.retry_after_seconds` 与"工具已经自己重试过"、
+  troubleshooting 那行写明了版本迁移。
+- Release 作业里那条匿名 wheel URL 证明第二次真的跑通：18:37:27Z 打出 proof target，
+  18:37:34Z 打出 `documented wheel URL installed and self-tested: ok`。
+
+**这次 CI 抓到我一个真问题**：三个 Python 矩阵全红，
+`ImportError while importing test module tests/test_throttle_contract.py →
+ModuleNotFoundError: No module named 'yaml'`。本地 144 个测试全绿是因为
+Anaconda 自带 PyYAML，而 Test 作业只装 `.[dev]`。这是本轮第二次把
+"我这台机的解释器有什么包"当成"CI 有什么包"（第一次是 §5h 那次 bootstrap 顺序回归）。
+修法是把依赖补进被测环境而不是把测试改成能用正则糊弄过去——自评包用了 YAML 锚点，
+必须真加载器才能解析别名，正则版只会静默漏掉 `*relay_*` 这类引用；
+于是 `dev` extras 加了 `PyYAML>=6`，注释写明为什么在这儿。
+判据：这个测试文件在 CI 里能红也能绿；上一版的红就是它的负对照。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
