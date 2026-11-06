@@ -191,7 +191,12 @@ jobs:
           # `pip install`. Comments (`# ...`) and prose mentions are allowed to
           # name the bare package, because that is how we warn about it.
           COMMAND = re.compile(r"^(?:\$ )?(?:python3(?:\.\d+)? -m )?pip install\b")
-          RESOLVES = ("git+https://github.com/smartlotus/pickvedio-agent", "-e ", ".[")
+          RESOLVES = (
+              "git+https://github.com/smartlotus/pickvedio-agent",
+              "releases/download/v",  # the wheel/sdist attached to the tag
+              "-e ",
+              ".[",
+          )
 
           offenders = []
           for path in SHIPPED:

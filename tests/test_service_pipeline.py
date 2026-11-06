@@ -336,6 +336,42 @@ def run_cli(args: list[str]) -> dict:
     return document
 
 
+def test_cli_resolve_declares_a_short_link_instead_of_an_unexplained_empty_id(settings, monkeypatch):
+    """A b23.tv link has no video id until the redirect is followed.
+
+    `resolve` is offline by design, so the honest envelope is the one that says
+    the id is missing *because* it is a short link, not one that looks like a
+    parse failure -- the phone workflow starts from exactly these links.
+    """
+    monkeypatch.delenv("PVC_SERVICE_URL", raising=False)
+    short = run_cli(["resolve", "--url", "看看这个 https://b23.tv/GUAy8Zm 讲得清楚"])
+    assert short["ok"] is True and short["_exit"] == 0
+    assert short["data"]["platform"] == "bilibili"
+    assert short["data"]["short_link"] is True
+    assert short["data"]["video_id"] == ""
+    assert short["data"]["hint"], "a short link must say where the canonical url comes from"
+
+    direct = run_cli(["resolve", "--url", "https://www.bilibili.com/video/BV1rjKn6CETw/"])
+    assert direct["data"]["short_link"] is False
+    assert direct["data"]["video_id"] == "BV1rjKn6CETw"
+    assert "hint" not in direct["data"]
+
+
+def test_envelope_keeps_hint_inside_data_on_failure_too(settings, monkeypatch):
+    """SKILL.md tells the agent to read `data.hint`, so that is where it goes.
+
+    The same helper builds success and failure envelopes; if `hint` ever lands
+    at the top level, an agent following the documented contract reads nothing
+    and reports a mystery instead of the remedy.
+    """
+    monkeypatch.delenv("PVC_SERVICE_URL", raising=False)
+    document = run_cli(["resolve", "--url", "今天没有链接，回头再说"])
+    assert document["ok"] is False and document["_exit"] == 1
+    assert document["code"] == "no_url"
+    assert "hint" not in document
+    assert document["data"]["hint"], document
+
+
 def test_cli_check_is_green_and_offline(settings):
     document = run_cli(["check"])
     assert document["ok"] is True and document["_exit"] == 0

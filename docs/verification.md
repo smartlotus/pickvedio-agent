@@ -302,8 +302,34 @@ v1.0.0 之前从未被推过，所以 `release.yml` 里两条路径都只是"看
 - `--target "$GITHUB_SHA"` 在 `workflow_dispatch` 路径上是**分支头**而不是 tag 的提交；
   而 `GITHUB_REF_NAME` 在 dispatch 时等于 `main`，也就是说手动重发一次会造出一个名叫
   "main" 的 release 并挂在错误的提交上。**修法**：workflow 级 `env.RELEASE_TAG`
-  = `inputs.tag || github.ref_name`，tag 推送与手动重发共用同一个值；`--target` 用 tag
-  本身（GitHub 接受 tag 名作为 target）。
+  = `inputs.tag || github.ref_name`，tag 推送与手动重发共用同一个值。
+- 我上一条里写的"`--target` 用 tag 名就行"是**错的**，而且是我自己刚写下的错：
+  本地用账号 token 真发一次 release 时，API 直接拒绝
+  `HTTP 422: Release.target_commitish is invalid`。`target_commitish` 只接受分支名或
+  commit SHA，不接受 tag 名。改成先 `gh api repos/<repo>/commits/<tag>` 把（带注释的）
+  tag 解析成提交，再 `--target $TARGET`——这条在 tag 推送与手动重发两种事件下同形。
+- `Publish the GitHub Release` 即便把 `contents: write` 同时写在 workflow 级和 job 级，
+  仍然 `HTTP 403: Resource not accessible by integration`；而
+  `GET /repos/.../actions/permissions/workflow` 对这个仓库返回
+  `default_workflow_permissions: read`。也就是说**卡住的是仓库的 Actions 设置，不是 YAML**。
+  我没有替用户改这个设置（它会把该仓库所有工作流的默认令牌权限放大到可写），
+  而是把两种解法写进了失败分支：一次性打开 read-write，或用账号 token 发 release。
+
+### v1.0.0 实际发布出去了什么
+
+CI 的 `Build sdist, wheel and skill pack` 全绿；三个下载件由我用账号 token 挂到了
+`releases/tag/v1.0.0`（target 是 9b6cdf2，即 tag 指向的那个提交）：
+
+```
+gh release view v1.0.0 --json assets -> whl 101262 B / tar.gz 110867 B / skill zip 34765 B
+curl -L .../releases/download/v1.0.0/video-summary-skill-1.0.0.zip -> 200, 34765 bytes
+curl -L .../releases/download/v1.0.0/pickvedio_core-1.0.0-py3-none-any.whl -> 200, 101262 bytes
+```
+
+匿名可下载（Muse 不需要任何凭据就能取），字节数与 API 报告的 size 逐个相等。
+装法也真验过：`pip install ./pickvedio_core-1.0.0-py3-none-any.whl[service]` 在干净 venv 里
+成功，`import service.app` 从无关 cwd 构造出 `FastAPI` 对象，`pvc resolve` 直接可用——
+这条路径不需要 git，是给"机器上没有 git"的用户的退路。
 
 `Publish to PyPI` 在这次真推里是 `skipped`（预期的默认态，因为 `PYPI_PUBLISH` 未设置），
 不再是"每次发布必红一格"。

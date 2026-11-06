@@ -219,11 +219,16 @@ def cmd_resolve(args) -> int:
             hint="支持：B 站分享文案 / b23.tv 短链 / BV 或 av 号 / YouTube 观看、shorts、youtu.be 链接。",
         ))
     primary = refs[0]
+    # b23.tv / youtu.be short links carry no video id until someone follows the
+    # redirect, and `resolve` is deliberately offline. Say so instead of
+    # returning an empty video_id that reads like a parse failure.
+    short_link = bool((primary.extra or {}).get("short_link"))
     payload: dict[str, Any] = {
         "url": primary.url,
         "platform": primary.platform,
         "video_id": primary.video_id,
         "identity": primary.identity,
+        "short_link": short_link,
     }
     if remote is not None:
         data = remote.request("GET", f"/v1/metadata?url={primary.url}")
@@ -231,6 +236,8 @@ def cmd_resolve(args) -> int:
     return emit(envelope(
         ok=True, code=OK,
         message=f"识别到 {primary.platform} 链接" + (f"（共 {len(refs)} 个）" if len(refs) > 1 else ""),
+        hint=("短链接不在这里展开（resolve 不联网）。后续 fetch/summarize/push 都会跟随跳转拿到规范链接；"
+              "只有需要人工打开页面时才有区别。") if short_link else None,
         urls=[{"url": item.url, "platform": item.platform, "video_id": item.video_id} for item in refs],
         **payload,
     ))

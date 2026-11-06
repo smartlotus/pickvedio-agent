@@ -56,12 +56,17 @@ curl fallbacks, one per service route (all need the bearer token):
 - discovery: `curl -fsS "$PVC_SERVICE_URL/openapi.json"`
 
 Output contract:
-- Every command prints exactly one JSON object on stdout:
-  `{"ok": true, "code": "...", "message": "...", "data": {...}}`. Parse `ok`
-  first; on `false`, read `code`, `message` and `hint` before deciding anything.
-  Progress lines go to stderr and are not part of the envelope.
+- Every command prints exactly one JSON object on stdout with exactly three
+  top-level keys -- `{"ok": ..., "code": ..., "message": ...}` -- plus `data`.
+  Everything else lives inside `data`, on failures as well as successes: the
+  remedy is `data.hint`, never a top-level `hint`. Parse `ok` first; on `false`,
+  read `code`, `message` and `data.hint` before deciding anything. Progress
+  lines go to stderr and are not part of the envelope.
 - `resolve` -> `data.platform`, `data.video_id`, `data.title`, `data.duration`,
   plus the canonical `data.url`. Use the canonical URL in every later call.
+  For a `b23.tv` short link `data.short_link` is `true` and `data.video_id` is
+  empty -- that is the documented offline behaviour, not a parse failure: the
+  later commands follow the redirect themselves.
 - `fetch` -> `data.transcript` (`[{start, end, text}]`), `data.source`,
   `data.confidence` (0-5). Blocked-unauthenticated is
   `ok:false, code:"needs_browser"` with the relay steps in `hint`.
