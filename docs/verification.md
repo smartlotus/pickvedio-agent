@@ -1268,6 +1268,43 @@ CI @9152bf6：14 个作业全绿，唯一非 success 是被有意跳过的 PyPI 
    里 YouTube 那半代码从未在真实页面上跑过。能访问 YouTube 的机器（比如 Muse）第一件
    该试的就是它。
 
+## 5ee. relay 输入形状矩阵（1.0.20 修掉一个"假成功"，并留一个已命名的缺口）
+
+顺着"拷贝坏了的抽取器到底交回什么"往下推，实测了 8 种 relay 形状打在**已发布的
+1.0.19** 代码上（`pvc fetch --url … --transcript <文件>`，进程内调用，非推测）：
+
+```
+""              rc=1  empty_transcript  hint 有
+"   "           rc=1  empty_transcript  hint 有
+{}              rc=1  empty_transcript  hint 有
+[]              rc=0  ok                ← 假成功（缺陷）
+null            rc=1  error             hint 为空
+undefined       rc=1  error             hint 为空
+缺文件           rc=1  error             hint 为空
+reason=no_subtitles_for_session  rc=1  empty_transcript + 登录指引
+真 120 段        rc=0  ok
+```
+
+根因：`to_transcript` 已把粘贴文本解码进 `document` 用来取元数据，却把**原始字符串**
+交给 `segments_from_payload`，而它的文本分支只重解析以 `{` 开头的内容。于是 `[]` 落进
+字幕正文解析器，变成"一条文字为 `[]` 的字幕"：0 段真话、退出码 0、`code: ok`。照
+skill 走的 agent 会总结一份不存在的东西并报告成功。1.0.13 那次只补了花括号半边。
+
+修法＝把解码后的 `document` 传下去（relay.py 内一处），并新增
+tests/test_relay_payload_shapes.py（10 条）把整张表钉成门禁，其中最后一条断言被打破
+的那个不变量：**任何 rc=0 都不许携带 0 段**。发布件里也核过：1.0.20 的 wheel 内
+`segments_from_payload(document, …)` 在场、旧写法不在场。191 passed / ruff clean /
+CI 14 绿 1 有意跳过（PyPI）。
+
+仍然开着、下一手该做的事（**已命名，不是遗漏**）：`null` / 字符串 `undefined` / 缺文件
+三类仍是通用 `code=error` 且 `data.hint` 为空。它们恰恰对应"抽取器压根没跑起来"（例如
+拷贝被截断，见 §5dd/§5ee 的 node --check 实测）——agent 拿不到可执行指令，就会把
+"我这边没拿到内容"说成"这视频没字幕"。设计：新增具名码 `relay_unreadable`（HTTP 422，
+不可重试），hint 里点名三个成因与各自补救（重拷并比哈希、确认读的是
+`window.__pvcRelay`、给出文件路径而不是内容字符串）；改动点有两处——
+`_read_payload` 的找不到文件分支，以及 `segments_from_payload` 里非 dict/list 的
+JSON 标量分支，所以要连着 CLI 与 `/v1/transcripts` 两条路一起测，不能只补 CLI。
+
 ## 6. 尚未验证 / still to verify after deployment
 
 - The extractor's YouTube branch has never run against a live page. This box
