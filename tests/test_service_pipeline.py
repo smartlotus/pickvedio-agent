@@ -536,6 +536,38 @@ def test_cli_status_reports_missing_without_printing_secrets(settings):
     assert document["data"]["channels"]["page_text"]["enabled_by_default"] is False
 
 
+def test_cli_push_of_an_empty_relay_reports_the_reason_and_a_hint(settings, monkeypatch):
+    """What the phone user gets back when the browser tier came up empty.
+
+    The envelope used to carry a generic sentence, an empty `data`, and no
+    `hint` -- so the agent had to go read relay.json itself to learn that the
+    session simply was not logged in.
+    """
+    monkeypatch.delenv("PVC_SERVICE_URL", raising=False)
+    payload = {
+        "platform": "bilibili",
+        "url": "https://www.bilibili.com/video/BV1pa5Ez5E2e/",
+        "title": "YouTube怎么翻译字幕成中文字幕",
+        "durationSeconds": 104,
+        "segments": [],
+        "charCount": 0,
+        "trackCount": 0,
+        "warnings": ["Bilibili served an empty subtitle list to this session."],
+        "reason": "no_subtitles_for_session",
+    }
+    document = run_cli([
+        "push", "--url", payload["url"], "--transcript", json.dumps(payload, ensure_ascii=False),
+        "--style", "brief",
+    ])
+    assert document["ok"] is False
+    assert document["code"] == "empty_transcript"
+    assert "no_subtitles_for_session" in document["message"]
+    data = document["data"]
+    assert data["hint"], "the failure must carry the next step, not just a diagnosis"
+    assert "登录" in data["hint"]
+    assert "empty subtitle list" in document["message"], "the extractor's own warning must survive"
+
+
 def test_cli_push_with_out_writes_the_documents(service_server, settings, tmp_path):
     """`--out` has to produce files on the *service* path too.
 

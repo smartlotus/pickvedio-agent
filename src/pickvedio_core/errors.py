@@ -13,6 +13,11 @@ class PickvedioError(RuntimeError):
     code = "error"
     http_status = 500
     retryable = False
+    # Declared on the base because every consumer reads it with
+    # ``getattr(exc, "hint", "")``: the CLI puts it in ``data.hint`` and the
+    # service in ``error.hint``. Subclasses that take it in __init__ overwrite
+    # it per instance; the default keeps a bare error honest (empty, not absent).
+    hint: str = ""
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return self.args[0] if self.args else self.__class__.__name__

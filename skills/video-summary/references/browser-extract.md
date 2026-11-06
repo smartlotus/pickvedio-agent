@@ -121,6 +121,9 @@ Read `reason`, do not retry blindly. 空结果不是错误，是信息：
 | `not_playable` | `playabilityStatus` is neither `OK` nor `ALLOWED` (region lock, sign-in required, members-only) | Stop; tell the user why. Do not attempt to unlock |
 | `no_video_id` / `no_cid` / `view_api_failed` | Page state unreadable | Re-open canonical URL once; then report |
 | `subtitle_body_empty` / `caption_body_empty` / `empty_segments` | Track exists but has no text | Treat as no transcript |
+| `subtitle_track_without_body` | Track list non-empty, every body fetch returned nothing | Re-fetch once from a freshly opened page; then report and offer ASR (costs money, needs consent) |
+| `caption_track_without_baseurl` | YouTube listed a track with no usable base URL | Re-open the canonical watch URL and re-evaluate; the player builds the URL only after playback state exists |
+| `extraction_failed` | Fallback: nothing more specific applied | Re-open the canonical URL, wait until playback actually starts, re-evaluate once; then report the warnings verbatim |
 | `unsupported_page` | Not bilibili/youtube | `pvc fetch` with yt-dlp's generic extractor, or decline |
 
 An empty `segments` array ends the ladder. The correct reply is the failure plus

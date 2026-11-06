@@ -50,6 +50,43 @@ class RelayResult:
     checks: dict[str, Any]
 
 
+RELAY_REASON_HINTS: dict[str, str] = {
+    # Mirrors the table in skills/video-summary/references/browser-extract.md,
+    # which is the authority; test_relay_reason_hints_cover_every_reason_the_
+    # extractor_can_emit fails if either side drifts or a key is invented.
+    "no_subtitles_for_session": (
+        "当前会话看不到字幕轨道——B 站的 AI 字幕只对已登录会话下发。"
+        "让用户在同一台机器上登录该站点后重跑一次提取，或改走已登录浏览器的页面本身；"
+        "这不是解析 bug，也不要因此去凑总结。"
+    ),
+    "subtitle_track_without_body": (
+        "有字幕轨道但一条正文都没取到：正文请求被拒或被截断。"
+        "重新打开页面再取一次；仍然为空就按失败上报，并提出 ASR 那条花钱的路（需用户同意）。"
+    ),
+    "subtitle_body_forbidden": "签名后的字幕地址被拒绝：重新打开页面取一次，再失败就上报。",
+    "subtitle_body_failed": "取字幕正文时网络失败：重新打开页面取一次，再失败就上报。",
+    "caption_body_empty": "字幕正文为空，等于没有逐字稿；按失败上报，不要改用简介。",
+    "empty_segments": "抽取到 0 段，多半是提取时机太早（播放器还没加载字幕）。等页面真正开始播放后再取一次。",
+    "extraction_failed": (
+        "提取器自己走到了兜底分支（没有更具体的 reason）。"
+        "重新打开规范观看地址、等播放器真正开始播放后再执行一次脚本；"
+        "两次都这样就把 warnings 原样上报，不要继续重试。"
+    ),
+    "subtitle_body_empty": "字幕正文为空，等于没有逐字稿；按失败上报，不要改用简介。",
+    "caption_track_without_baseurl": "YouTube 只给了清单没给可取正文的地址：重新打开观看页再取一次。",
+    "no_captions": "这个 YouTube 视频一条 caption 轨道都没有：只剩 ASR（花钱，需同意）或如实失败。",
+    "captions_translate_only": "页面只有翻译元数据、没有轨道清单：带 translateTo 重取一次，仍不行就走 ASR 或如实失败。",
+    "rate_limited": "timedtext 返回 429：退避，让页面自己播一次后再取一次，最多重试一次。",
+    "caption_forbidden": "该会话无权取这套字幕（401/403）：如实上报，不要尝试绕过。",
+    "no_player_response": "页面状态不可读（开错页或求值太早）：用规范观看地址重开一次，等播放器就绪再取。",
+    "no_video_id": "没能从页面拿到 BV/av 号：多半是列表页或搜索页，请让用户发视频本页。",
+    "no_cid": "没能解析出 cid，因此无法请求字幕轨道：用规范观看地址重开一次。",
+    "view_api_failed": "web-interface/view 请求失败：检查是否被地区/风控拦截，重开一次后如实上报。",
+    "not_playable": "内容不可播放（地区限制、需登录、会员专享）：停止，说明原因，不要试图绕过。",
+    "unsupported_page": "这不是 B 站/YouTube 页面：可以用 `pvc fetch` 的通用提取器试，或如实说明不支持。",
+}
+
+
 def _source_kind(value: str | None) -> SourceKind:
     key = (value or "").strip().lower().replace("-", "_")
     if key in _SOURCE_ALIASES:
@@ -150,18 +187,32 @@ def to_transcript(
     of that length. Callers that genuinely want to summarise a description pass
     ``source_kind="page_text"`` explicitly, which is honoured and labelled.
     """
-    if duration is None and isinstance(payload, dict):
-            raw = payload.get("duration") or payload.get("durationSeconds")
+    # `pvc push --transcript '<inline JSON>'` and --transcript relay.json both
+    # arrive as *text*: _read_payload hands over the raw string, and only
+    # segments_from_payload parses it. Reading the metadata before that parse
+    # meant every field the extractor worked to obtain -- reason, warnings,
+    # title, durationSeconds, sourceKind -- silently disappeared for the
+    # most-common invocation, which is exactly the phone path.
+    document: Any = payload
+    if isinstance(document, str):
+        text = document.strip()
+        if text[:1] in "[{":
+            try:
+                document = json.loads(text)
+            except ValueError:
+                document = payload
+    if duration is None and isinstance(document, dict):
+            raw = document.get("duration") or document.get("durationSeconds")
             try:
                 duration = float(raw) if raw not in (None, "") else None
             except (TypeError, ValueError):
                 duration = None
-    if not title and isinstance(payload, dict):
-        title = str(payload.get("title") or "")
-    if not language and isinstance(payload, dict):
-        language = str(payload.get("language") or payload.get("lang") or "")
-    if not source_kind and isinstance(payload, dict):
-        source_kind = str(payload.get("sourceKind") or payload.get("source") or "")
+    if not title and isinstance(document, dict):
+        title = str(document.get("title") or "")
+    if not language and isinstance(document, dict):
+        language = str(document.get("language") or document.get("lang") or "")
+    if not source_kind and isinstance(document, dict):
+        source_kind = str(document.get("sourceKind") or document.get("source") or "")
     key = (source_kind or "").strip().lower().replace("-", "_")
 
     segments = segments_from_payload(payload, name=name, fmt=fmt, duration=duration)
@@ -171,10 +222,26 @@ def to_transcript(
     segments = normalise(segments, duration)
     warnings: list[str] = []
     if not segments:
-        raise EmptyTranscript(
-            "回传内容里没有可用的文字。可能是页面正文被误当成字幕、字幕轨道为空，"
-            "或提交的结构与 `segments` / `body` / `text` 都不匹配。"
+        # The extractor knows *why* it came back empty, and that reason is the
+        # whole difference between "ask the user to log in", "retry later" and
+        # "this video is not playable -- stop". Dropping it turned every empty
+        # relay into the same generic complaint and made the agent guess.
+        reason = str(document.get("reason") or "") if isinstance(document, dict) else ""
+        relay_warnings = [str(item) for item in ((document.get("warnings") or []) if isinstance(document, dict) else []) if item]
+        detail = f"提取器给出 reason={reason}" if reason else "提交内容里没有 reason 字段，无法判断是哪一层空的"
+        message = (
+            "回传内容里没有可用的文字（0 段）。" + detail
+            + "；常见原因是字幕轨道对当前会话为空、正文请求被拒，"
+            + "或提交的结构与 `segments` / `body` / `text` 都不匹配。"
         )
+        if relay_warnings:
+            message += " 提取器的警告：" + " / ".join(relay_warnings[:2])
+        error = EmptyTranscript(message)
+        error.hint = RELAY_REASON_HINTS.get(reason) or (
+            "把 relay.json 里的 reason 与 warnings 原样转达用户并停下。"
+            "绝对不要改用视频简介、标题、评论或搜索结果来凑一份总结。"
+        )
+        raise error
 
     chars = sum(len(item.text) for item in segments)
     checks = {

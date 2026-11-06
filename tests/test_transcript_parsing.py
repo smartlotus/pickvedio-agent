@@ -189,6 +189,109 @@ def test_relay_rejects_empty_and_reports_the_reason():
         to_transcript("https://www.bilibili.com/video/BV1rjKn6CETw/", "   \n  \n")
 
 
+# Captured verbatim from the published browser-extract.js (v1.0.4, fetched from
+# the CDN and evaluated inside a live Bilibili page, logged-out session). This
+# is what a real relay looks like when there is nothing to relay.
+LIVE_EMPTY_RELAY = {
+    "platform": "bilibili",
+    "url": "https://www.bilibili.com/video/BV1pa5Ez5E2e/",
+    "title": "YouTube怎么翻译字幕成中文字幕",
+    "durationSeconds": 104,
+    "sourceKind": None,
+    "language": "",
+    "trackLabel": "",
+    "trackCount": 0,
+    "segments": [],
+    "charCount": 0,
+    "warnings": [
+        "Bilibili served an empty subtitle list to this session. Either this account "
+        "is not logged in (AI subtitles require a logged-in session) or the video has "
+        "no subtitles at all."
+    ],
+    "reason": "no_subtitles_for_session",
+    "extractedAt": "2026-11-06T17:07:40.229Z",
+}
+
+
+def test_empty_relay_keeps_the_extractors_reason_and_warnings():
+    """The reason is the difference between "log in" and "this video has none".
+
+    The old message was one generic sentence for every empty payload, so the
+    agent had to open relay.json itself and interpret a field the tool had
+    already read.
+    """
+    with pytest.raises(EmptyTranscript) as caught:
+        to_transcript(LIVE_EMPTY_RELAY["url"], LIVE_EMPTY_RELAY)
+    text = str(caught.value)
+    assert "no_subtitles_for_session" in text
+    assert "empty subtitle list" in text, text  # the extractor's own warning survives
+    assert "登录" in caught.value.hint
+
+
+def test_hint_changes_with_the_reason():
+    """Proves the hint is a lookup, not a constant sentence."""
+    hints = set()
+    for reason in ("no_subtitles_for_session", "not_playable", "rate_limited", "extraction_failed"):
+        payload = dict(LIVE_EMPTY_RELAY, reason=reason)
+        with pytest.raises(EmptyTranscript) as caught:
+            to_transcript(LIVE_EMPTY_RELAY["url"], payload)
+        hints.add(caught.value.hint)
+    assert len(hints) == 4, hints
+
+
+def test_relay_reason_hints_cover_every_reason_the_extractor_can_emit():
+    """No invented vocabulary, and no reason the shipped script can emit is unmapped.
+
+    The extractor is 31 KB of browser JavaScript whose only consumer on the
+    server side is this dict; a reason added there and not here silently degrades
+    to the generic fallback for the user's phone.
+    """
+    import re
+    from pathlib import Path
+
+    from pickvedio_core.sources.relay import RELAY_REASON_HINTS
+
+    root = Path(__file__).resolve().parents[1]
+    js = (root / "skills/video-summary/assets/browser-extract.js").read_text(encoding="utf-8")
+    emitted: set[str] = set()
+    for line in js.splitlines():
+        if "reason" in line:
+            emitted.update(re.findall(r"[\"']([a-z][a-z_]{3,40})[\"']", line))
+    assert len(emitted) >= 12, f"only {len(emitted)} reasons parsed out of the JS; the extractor changed shape"
+
+    missing = sorted(emitted - set(RELAY_REASON_HINTS))
+    assert not missing, f"extractor emits reasons with no hint: {missing}"
+
+    docs = (root / "skills/video-summary/references/browser-extract.md").read_text(encoding="utf-8")
+    invented = sorted(key for key in RELAY_REASON_HINTS if key not in emitted and f"`{key}`" not in docs)
+    assert not invented, f"hint map cites reasons nothing produces: {invented}"
+    undocumented = sorted(key for key in emitted if f"`{key}`" not in docs)
+    assert not undocumented, f"extractor emits reasons the reason table does not explain: {undocumented}"
+
+
+def test_relay_reads_metadata_from_json_text_not_only_from_dicts():
+    """`--transcript '<inline JSON>'` and `--transcript relay.json` arrive as text.
+
+    The metadata lookups used to run only when the payload was already a dict,
+    so on the most common invocation the title, the duration, the declared
+    source kind and the extractor's reason all vanished -- the report silently
+    lost its provenance label and the sparse guard lost the duration it needs.
+    """
+    payload = json.dumps({
+        "platform": "bilibili",
+        "title": "三小时讲座",
+        "durationSeconds": 300,
+        "sourceKind": "up_subtitles",
+        "segments": [{"start": idx * 10.0, "end": idx * 10.0 + 9.0, "text": f"第 {idx} 句内容足够长。" * 4}
+                     for idx in range(1, 6)],
+    }, ensure_ascii=False)
+    result = to_transcript("https://www.bilibili.com/video/BV1rjKn6CETw/", payload)
+    assert result.transcript.title == "三小时讲座"
+    assert result.transcript.duration == 300.0
+    assert result.transcript.source is SourceKind.UP_SUBTITLES
+    assert "未声明字幕来源类型" not in " ".join(result.warnings)
+
+
 def test_relay_detects_untimed_content_and_warns():
     payload = {"segments": [{"text": f"第 {index} 句，内容足够长以避免密度门禁生效。" * 3}
                             for index in range(12)], "duration": 600}

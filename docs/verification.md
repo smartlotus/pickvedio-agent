@@ -605,7 +605,51 @@ SKILL.md 的合同改成"有 `--out` 才有文件，回 8 个文件名；没有�
 `data.report_markdown`、`transcript.srt` 里 ` --> ` 恰好 20 个、`transcript.vtt`
 以 `WEBVTT` 开头。
 
-## 6. 尚未验证 / still to verify after deployment
+## 5n. 从 CDN 取回发布件，在真页面上跑了一遍抽取器——然后发现回传元数据一直在丢
+
+这一步之前没有任何自动化覆盖：`assets/browser-extract.js` 只有 31 KB 的
+`node --check` 语法门，没有"在真页面上跑起来"的证据。做法：在内置浏览器里打开
+`BV1pa5Ez5E2e`，从 **jsDelivr 取 v1.0.4 的发布件原文**（`access-control-allow-origin: *`，
+200 / 30247 字节），`eval` 后 await 它返回的对象。结果干净落地：
+
+```
+platform=bilibili  title=YouTube怎么翻译字幕成中文字幕  durationSeconds=104
+trackCount=0  segments=[]  charCount=0
+reason=no_subtitles_for_session
+warnings=["Bilibili served an empty subtitle list to this session. …"]
+```
+
+顺带否证了一件事：`raw.githubusercontent.com` 从这台机 6 秒就 abort，
+所以此前那次 15 秒超时是**取文件**失败，不是抽取器崩；jsDelivr 可达。
+
+把**这个真实对象**原样喂给 `pvc push`，才暴露第二层缺陷：
+
+1. envelope 的 `data` 是空的、没有 `hint`，message 是一句通用"回传内容里没有可用的文字"；
+   `reason` 与 `warnings` 被丢掉——而 `reason` 正是"让用户去登录"、
+   "这视频根本没字幕"、"不可播就停下别绕"三种不同下一步的分界。
+2. 更根上的：`_read_payload` 把**原始文本**交给下游，而 `to_transcript` 的元数据读取
+   全部包在 `isinstance(payload, dict)` 里。于是 `--transcript relay.json` 与
+   `--transcript '<内联 JSON>'` 这两条最常用的写法下，`title` / `durationSeconds` /
+   `sourceKind` / `reason` 一个都读不到——报告里的来源标签与稀疏门禁依赖的时长
+   都静默降级（那条"未声明字幕来源类型，按 `relayed` 记录"的警告就是这么触发的）。
+
+修：`to_transcript` 顶部先把文本解析成 document，元数据与 reason/warnings 都从 document 读；
+`EmptyTranscript` 带上按 reason 查表的 `hint`（`RELAY_REASON_HINTS`，19 条，语义逐条对齐
+references/browser-extract.md 的 reason 表）；`hint` 提升为 `PickvedioError` 的类级字段
+（消费方一直是 `getattr(exc, "hint", "")`）。补齐两处词汇表不齐：JS 的兜底
+`extraction_failed` 原本没有对应提示，`caption_track_without_baseurl` 与
+`extraction_failed` 原本没写进文档表。
+
+三道新测试把这类漂移钉住，且都做过红/绿双向验证（把 relay.py/errors.py 退回 HEAD 后
+5 个测试同时 FAILED，恢复后 0 FAILED）：`test_relay_reason_hints_cover_every_reason_the_extractor_can_emit`
+直接解析 JS 源码里出现的 reason 集合，要求 map 全覆盖、不许有 JS 与文档都不认识的键、
+每个被发出的 reason 都能在文档表查到；`test_hint_changes_with_the_reason` 用 4 个不同
+reason 断言 hint 有 4 种，防止退化成一坨常量；
+`test_relay_reads_metadata_from_json_text_not_only_from_dicts` 断言文本形态的 payload
+照样读出 title/duration/sourceKind。
+
+1.0.5 是为了让**装到 agent 机器上的那个 wheel** 也带上这两处行为。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
