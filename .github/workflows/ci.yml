@@ -123,9 +123,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: Run bootstrap.sh from a fresh clone
+        # The console log is written outside the checkout on purpose: it contains
+        # this runner's absolute paths, and the step below asserts that a real
+        # bootstrap leaves no untracked file in the tree.
         run: |
-          bash bootstrap.sh | tee bootstrap-log.txt
-          grep -q "verdict: READY" bootstrap-log.txt
+          LOG="${RUNNER_TEMP:-/tmp}/bootstrap.log"
+          bash bootstrap.sh | tee "$LOG"
+          grep -q "verdict: READY" "$LOG"
           test -x .venv/bin/pvc
           .venv/bin/pvc profiles | python3 -c "
           import json,sys
@@ -138,12 +142,17 @@ jobs:
         # `git add -f` to look for them, which would stage exactly the files
         # this step is supposed to catch.
         run: |
-          touch .bootstrap-check.json .bootstrap-status.json
           for f in .bootstrap-check.json .bootstrap-status.json; do
+            touch "$f"
             git check-ignore -q "$f" || { echo "$f must be in .gitignore"; exit 1; }
           done
-          git status --porcelain | grep -E '^\?\? ' && {
-            echo "unexpected untracked files after bootstrap"; exit 1; } || true
+          left=$(git status --porcelain | grep -E '^\?\? ' || true)
+          if [ -n "$left" ]; then
+            echo "::error::bootstrap wrote something nobody declared as ignored"
+            echo "$left"
+            exit 1
+          fi
+          echo "checkout still clean after a real bootstrap run"
 
   skill:
     name: Skill pack (Muse)
