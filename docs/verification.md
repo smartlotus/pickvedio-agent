@@ -848,6 +848,13 @@ Anaconda 自带 PyYAML，而 Test 作业只装 `.[dev]`。这是本轮第二次�
 于是 `dev` extras 加了 `PyYAML>=6`，注释写明为什么在这儿。
 判据：这个测试文件在 CI 里能红也能绿；上一版的红就是它的负对照。
 
+一处口径要说清：`PyYAML` 补在 dev extras，而 v1.0.8 的**发布件**是在补之前那个提交
+（0632bff）上构建的，所以 `pip install "pickvedio-core[dev] @ git+…@v1.0.8"` 拿到的
+仍然是没有 PyYAML 的那份 dev 元数据。运行时不受影响（`[service]`/基础安装都不需要它，
+测试也不打进 wheel），而想在标签上做开发的人本来就应当在 clone 里跑
+`pip install -e '.[dev]'`（走 main，已含此修复）。不值得为这一行 dev 元数据再发一版，
+但也不假装它已经进过 1.0.8 的包。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
