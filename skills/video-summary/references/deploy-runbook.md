@@ -86,6 +86,15 @@ Do these in order, and show me the raw command and the raw output of every step:
       execute skills/video-summary/assets/browser-extract.js inside the page, save the
       whole returned object as relay.json, then run
       `.venv/bin/pvc push --url "<canonical link>" --transcript relay.json --style brief`;
+      if I have NOT given you a model key (`pvc status` says data.llm.api_key_present is
+      false and no service is configured), do not run push -- it queues a job that cannot
+      finish and still bills. Run
+      `.venv/bin/pvc fetch --url "<canonical link>" --transcript relay.json --out segments.json`
+      instead: no network, no model call, and the same sparse-content gate refuses a relay
+      whose cues never loaded, before you read it. Then write the Chinese summary yourself
+      from the real start/end times in segments, and say plainly in your reply that this
+      summary is yours rather than the pipeline's. Timestamps may only be copied from
+      segments.
    d. if that push answers ok=false: treat data.hint as the authoritative next step and
       follow it, and paste me code, message and data.hint verbatim. The hint separates
       "this session is not logged in", "this video has no captions at all" and
@@ -105,7 +114,9 @@ Do these in order, and show me the raw command and the raw output of every step:
 5. On any failure: show the command, code, message and data.hint before you give me
    your own judgement, and never retry the same error more than twice in a row.
 
-I will give you the model key myself (PVC_LLM_PROVIDER and PVC_LLM_API_KEY). You must
+I will give you the model key myself (PVC_LLM_PROVIDER and PVC_LLM_API_KEY). Until I do,
+the keyless branch in step 3.c is the default route: obtain the transcript, write the
+summary yourself, spend nothing. You must
 never print its value in any reply, and never write it into a repo file, a log or a commit.
 ```
 
@@ -203,10 +214,10 @@ Honest list, because each one changes how the agent must behave:
 
 ```bash
 # pickvedio-core is not on PyPI; install it from this repository.
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.15"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.16"
 # or, from a clone: bash bootstrap.sh   (creates ./.venv and self-tests it)
 # or, with no git on the machine: the wheel attached to the tag (anonymous GET)
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.15/pickvedio_core-1.0.15-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.16/pickvedio_core-1.0.16-py3-none-any.whl"
 cat > ~/.pvc.env <<'ENV'
 export PVC_SERVICE_URL="https://<hostname>"
 export PVC_API_TOKEN="<inbound token>"

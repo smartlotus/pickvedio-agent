@@ -76,6 +76,12 @@ https://github.com/smartlotus/pickvedio-agent
    c. 如果返回 code 是 needs_browser 或 needs_auth：打开那个视频页，在页面里执行
       skills/video-summary/assets/browser-extract.js，把它返回的整个对象存成 relay.json，
       然后执行 .venv/bin/pvc push --url "<规范链接>" --transcript relay.json --style brief；
+      如果我这条消息里没给你模型 key（`pvc status` 的 data.llm.api_key_present 是 false
+      且没配服务），就不要执行 push——它会提交一个跑不完还照扣钱的任务。改成执行
+      .venv/bin/pvc fetch --url "<规范链接>" --transcript relay.json --out segments.json
+      （这一步不联网、不调模型，但会用同一套门禁拒绝没加载出字幕的 relay），
+      然后你自己按 segments 的真实 start/end 写这份中文短总结，并在回复里说明
+      "这份总结是我自己写的，不是流水线出的"。时间戳只能来自 segments，不许编。
    d. 如果 push 回来 ok=false：把 data.hint 当成下一步的权威指令照做，并把 code、
       message、data.hint 原样贴给我。hint 会区分"当前会话没登录"、"这视频根本没字幕"、
       "不可播/会员专享，停下别绕"这三种完全不同的去向。
@@ -90,7 +96,8 @@ https://github.com/smartlotus/pickvedio-agent
 
 5. 任何失败先贴命令、code、message、data.hint，再说你的判断；同一个错误不要连续重试超过两次。
 
-模型 key 我会给你（PVC_LLM_PROVIDER 和 PVC_LLM_API_KEY）。
+模型 key 我会给你（PVC_LLM_PROVIDER 和 PVC_LLM_API_KEY）。没给之前，上面 3.c 的
+无 key 分支就是默认走法：拿逐字稿、由你自己写总结，全程不花额度。
 你不得在任何回复里打印 key 的值，也不得把它写进仓库文件、日志或提交里。
 ```
 
@@ -176,7 +183,7 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
 ```bash
 curl -fsS "https://<域名>/healthz"                      # -> 200，免令牌
 curl -fsS "https://<域名>/v1/profiles" -H "Authorization: Bearer $PVC_API_TOKEN"
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.15"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.16"
                                                          # 这个名字不在 PyPI 上，必须带 git+ 地址；
                                                          # clone 过的话用 bash bootstrap.sh 更省事
 export PVC_SERVICE_URL="https://<域名>"

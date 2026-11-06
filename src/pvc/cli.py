@@ -247,6 +247,8 @@ def cmd_resolve(args) -> int:
 
 def cmd_fetch(args) -> int:
     settings = _settings(args)
+    if getattr(args, "transcript", ""):
+        return _fetch_from_relay(args, settings)
     from pickvedio_core.sources.ladder import resolve
 
     url = validate_video_url(_target(args), allow_unknown_platform=settings.allow_unknown_platform)
@@ -281,6 +283,69 @@ def cmd_fetch(args) -> int:
         transcript=segments,
         attempts=resolution.trail,
         warnings=resolution.warnings,
+        meta=transcript.meta,
+        out=written or None,
+    ))
+
+
+def _fetch_from_relay(args, settings: Settings) -> int:
+    """Relay payload -> validated segments, with no network and no model call.
+
+    The deployed agent VM usually has no `PVC_LLM_API_KEY`: the agent reads the
+    transcript and writes the summary itself. That route still needs the same
+    sparse-content gate the summarising paths apply, or a page carrying no
+    captions becomes a confident paragraph about nothing. `--service` is refused
+    here because `POST /v1/transcripts` starts a job that spends.
+    """
+    if _service_from_args(args) is not None:
+        return emit(envelope(
+            ok=False, code="configuration",
+            message="`fetch --transcript` 只在本地校验，不联网、不调用模型，所以不会替你提交任务。",
+            hint="去掉 --service 重跑本命令，拿到 segments 后由你自己撰写总结，不花任何额度；"
+                 "确实要让服务总结这份回传字幕，改用 `pvc push --url … --transcript …`（那一步会开始花钱）。",
+        ))
+    url = validate_video_url(_target(args), allow_unknown_platform=settings.allow_unknown_platform)
+    payload = _read_payload(args.transcript)
+    from pickvedio_core.sources.relay import to_transcript
+
+    relayed = to_transcript(
+        url,
+        payload,
+        title=args.title or "",
+        duration=args.duration,
+        language="",
+        source_kind=args.source_kind or "",
+        uploader="",
+        origin="pvc-cli",
+        name=args.transcript if args.transcript != "-" else "",
+        strict=not args.allow_sparse,
+    )
+    transcript = relayed.transcript
+    segments = [item.as_dict() for item in transcript.segments]
+    written = ""
+    if args.out:
+        out = Path(args.out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(segments, ensure_ascii=False, indent=2), encoding="utf-8")
+        written = str(out)
+    return emit(envelope(
+        ok=True, code=OK,
+        message=(f"已校验回传逐字稿：{len(segments)} 段 / {transcript.char_count} 字"
+                 f"（来源 {transcript.source.value}），未调用模型。"),
+        url=transcript.video_url,
+        title=transcript.title,
+        duration=transcript.duration,
+        language=transcript.language,
+        channel=transcript.channel,
+        source=transcript.source.value,
+        confidence=transcript.confidence,
+        chars=transcript.char_count,
+        segments=segments,
+        transcript=segments,
+        attempts=[{"channel": "relay", "ok": True,
+                   "detail": f"回传内容 {transcript.char_count} 字，来自 {args.transcript[:60]}",
+                   "code": "", "seconds": 0.0}],
+        warnings=list(relayed.warnings),
         meta=transcript.meta,
         out=written or None,
     ))
@@ -703,6 +768,13 @@ def build_parser() -> argparse.ArgumentParser:
     fetch.add_argument("--allow-page-text", action="store_true")
     fetch.add_argument("--sessdata", default="")
     fetch.add_argument("--cookie-file", default="")
+    fetch.add_argument("--transcript", default="",
+                       help="浏览器回传或本地字幕：JSON/SRT/VTT 文件路径、`-` 或内联 JSON。"
+                            "给了它就不联网、不调用任何模型，只做校验")
+    fetch.add_argument("--title", default="")
+    fetch.add_argument("--duration", type=float, default=None)
+    fetch.add_argument("--source-kind", default="", help="up_subtitles|human_subtitles|platform_auto|relayed")
+    fetch.add_argument("--allow-sparse", action="store_true", help="关闭稀疏内容拒绝（逐字稿可能不可靠）")
     add_remote(fetch)
     fetch.set_defaults(func=cmd_fetch)
 

@@ -56,11 +56,11 @@ logged-in browser.
 ```bash
 bash bootstrap.sh                # 建 venv + 装依赖 + 离线自检，最后一行应是 verdict: READY
 python3 -m pip install -e '.[dev]'   # 手动等价做法（在仓库目录里）
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.15"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.16"
                                     # 不在仓库里时的安装法。注意：这个名字没有发到 PyPI，
                                     # `pip install pickvedio-core` 会报 No matching
                                     # distribution found —— 必须带 git+ 地址
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.15/pickvedio_core-1.0.15-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.16/pickvedio_core-1.0.16-py3-none-any.whl"
                                     # 机器上没有 git 时的等价做法：直接装 Release 附件，
                                     # 匿名可下载。Release 作业每次发版都按当时的 tag 把
                                     # 这条形状的命令真跑一遍（v1.0.15 已实测通过；1.0.4 时
@@ -111,6 +111,7 @@ Every subcommand emits exactly one JSON envelope on stdout; failures carry a
 pvc status [--service URL]      通道与配置自检（不打印任何密钥值）
 pvc resolve "任意文本"           识别并归一化链接
 pvc fetch URL [--out f.json]    只取逐字稿
+pvc fetch --url U --transcript F 校验浏览器回传的字幕（不联网、不调模型；无 key 部署用这条）
 pvc push --url U --transcript F 接受浏览器回传的字幕并总结
 pvc summarize URL [--style S] [--estimate-only] [--out DIR]
 pvc job create|status|wait|report|list|cancel|prune

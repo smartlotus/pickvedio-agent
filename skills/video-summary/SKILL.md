@@ -28,7 +28,7 @@ PyPI, so a bare `pip install pickvedio-core` fails with "No matching distributio
 found" and that is an install-path mistake, not a bug in the tool:
 
 ```bash
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.15"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.16"
 ```
 
 Extras go inside the bracket before the `@`:
@@ -40,6 +40,9 @@ Core commands:
 - `pvc status [--service <url>]`
 - `pvc resolve --url "<video url or share text>"`
 - `pvc fetch --url "<url>" [--out FILE] [--cookie-file FILE] [--sessdata VALUE]`
+- `pvc fetch --url "<url>" --transcript relay.json [--out FILE] [--allow-sparse]`
+  -- validate a relayed payload offline: no ladder, no provider call, same
+  sparse-content refusal as the summarising paths. This is the keyless route.
 - `pvc summarize --url "<url>" [--style general|interview|tutorial|brief] [--out DIR] [--service URL] [--token VALUE]`
 - `pvc push --url "<url>" --transcript FILE.json|- [--title T] [--duration S] [--style brief] [--out DIR]`
 - `pvc job create --url "<url>" [--style S]`
@@ -125,6 +128,15 @@ Follow in order, stop at the first tier that yields real speech text. 逐级降�
    almost always an extraction that ran before the cues loaded). Both carry a
    `data.hint` naming the next step, and neither is a licence to summarise the
    description instead.
+   **If this machine has no `PVC_LLM_API_KEY`** (`pvc status` ->
+   `data.llm.api_key_present` is false and no service is configured) do not
+   submit `push`: it starts a job that cannot finish and it spends. Validate the
+   relay with `pvc fetch --url "<canonical url>" --transcript relay.json --out segments.json`
+   instead -- no network, no model call, and the *same* `sparse_transcript` gate,
+   so a page with no cues is refused before you ever read it -- then write the
+   summary yourself from `data.segments`, using their real `start`/`end`. Say in
+   the reply that the summary is yours, not the pipeline's, and quote timestamps
+   only from those segments.
 4. **Poll.** Long videos exceed free-tier request timeouts, so the service is
    asynchronous: `pvc job wait --id <job_id> --timeout 600` (it polls
    internally). Surface `data.stage`/`data.progress` while waiting; a stage stuck
