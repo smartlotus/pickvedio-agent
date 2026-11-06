@@ -83,8 +83,11 @@ Do these in order, and show me the raw command and the raw output of every step:
 4. When you answer me, the body is data.summary (the short --style brief version for a
    phone chat), plus one provenance line: which caption tier it came from (source),
    confidence, segment count, which model. Read out data.warnings if it is non-empty.
-   For a long video use `pvc job create` then `pvc job wait` instead of sitting on a
-   request that will time out.
+   For a long video, run
+   `.venv/bin/pvc push --url "<canonical link>" --transcript relay.json --estimate-only`
+   first and tell me the chunk count and the minimum number of model calls; only
+   summarise after I agree. Then use `pvc job create` and `pvc job wait` instead of
+   sitting on a request that will time out.
 
 5. On any failure: show the command, code, message and data.hint before you give me
    your own judgement, and never retry the same error more than twice in a row.
@@ -187,10 +190,10 @@ Honest list, because each one changes how the agent must behave:
 
 ```bash
 # pickvedio-core is not on PyPI; install it from this repository.
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.8"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.9"
 # or, from a clone: bash bootstrap.sh   (creates ./.venv and self-tests it)
 # or, with no git on the machine: the wheel attached to the tag (anonymous GET)
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.8/pickvedio_core-1.0.8-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.9/pickvedio_core-1.0.9-py3-none-any.whl"
 cat > ~/.pvc.env <<'ENV'
 export PVC_SERVICE_URL="https://<hostname>"
 export PVC_API_TOKEN="<inbound token>"

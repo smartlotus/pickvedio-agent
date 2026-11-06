@@ -28,7 +28,7 @@ PyPI, so a bare `pip install pickvedio-core` fails with "No matching distributio
 found" and that is an install-path mistake, not a bug in the tool:
 
 ```bash
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.8"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.9"
 ```
 
 Extras go inside the bracket before the `@`:
@@ -100,13 +100,23 @@ Follow in order, stop at the first tier that yields real speech text. 逐级降�
    only when the user has a deployment). Ready to summarise straight away:
    `pvc summarize --url … --style brief`. Before spending on a long video,
    `pvc summarize --url … --estimate-only` reports chunk count and expected
-   model calls and touches no provider.
+   model calls and touches no provider -- but it has to obtain a transcript
+   first, so on the phone route it usually answers `needs_browser`. Once you are
+   holding a `relay.json`, the estimate that always works is
+   `pvc push --url "<canonical url>" --transcript relay.json --estimate-only`:
+   same validation as the real run, zero provider calls, and it refuses exactly
+   what the run would refuse.
 3. **On `needs_browser`, relay.** Do not retry `fetch` and do not add cookies to
    it. Open the canonical URL in the logged-in cloud browser, evaluate
    `assets/browser-extract.js`, save the result as `relay.json`, then
    `pvc push --url "<canonical url>" --transcript relay.json --title "<title>" --duration <durationSeconds> --style brief`.
    Details and the empty-result taxonomy: `references/browser-extract.md`.
-   No captions on the page -> tier 5, not a retry loop.
+   No captions on the page -> tier 5, not a retry loop. Two refusal codes
+   belong here: `empty_transcript` (nothing usable arrived) and
+   `sparse_transcript` (text arrived, but far too little for a video that long --
+   almost always an extraction that ran before the cues loaded). Both carry a
+   `data.hint` naming the next step, and neither is a licence to summarise the
+   description instead.
 4. **Poll.** Long videos exceed free-tier request timeouts, so the service is
    asynchronous: `pvc job wait --id <job_id> --timeout 600` (it polls
    internally). Surface `data.stage`/`data.progress` while waiting; a stage stuck

@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..errors import EmptyTranscript, PickvedioError
+from ..errors import EmptyTranscript, PickvedioError, SparseTranscript
 from ..models import Segment, SourceKind, Transcript
 from ..util import format_time
 from .parsers import normalise, parse
@@ -266,18 +266,30 @@ def to_transcript(
                 f"（每分钟约 {per_minute:.0f} 字，正常口语在 100 字以上）。"
             )
             if strict and key != "page_text":
-                raise PickvedioError(
+                error = SparseTranscript(
                     message
                     + "请确认在字幕轨道加载后重新提取，或改用音频转写。"
                     " 若确实只有简介文字，请显式声明 source=page_text。"
                 )
+                error.hint = (
+                    "十有八九是提取时机太早：让页面真正开始播放、字幕轨道加载后再跑一次"
+                    " browser-extract.js。如果这个视频确实只有简介文字，那它就是没有逐字稿，"
+                    "要么按 page_text 如实标注，要么走付费 ASR（须用户同意），"
+                    "不要拿简介冒充讲话内容。"
+                )
+                raise error
             warnings.append(message)
 
     if len(segments) < MIN_LINES_FOR_SUMMARY:
         message = f"只有 {len(segments)} 段文字，内容过短，分层总结的意义有限。"
         warnings.append(message)
         if strict and key != "page_text" and duration and duration > 600:
-            raise PickvedioError(message + "（长视频只回传几段，通常是提取时机太早。）")
+            error = SparseTranscript(message + "（长视频只回传几段，通常是提取时机太早。）")
+            error.hint = (
+                "长视频只拿到几段：等页面播放起来、字幕轨道加载完成后重新提取一次；"
+                "两次都这样就把段数与时长原样报给用户，不要开始总结。"
+            )
+            raise error
 
     if not timed:
         warnings.append("回传内容没有时间信息，报告中的时间点均为估计值，不可作为定位依据。")

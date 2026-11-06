@@ -855,6 +855,42 @@ Anaconda 自带 PyYAML，而 Test 作业只装 `.[dev]`。这是本轮第二次�
 `pip install -e '.[dev]'`（走 main，已含此修复）。不值得为这一行 dev 元数据再发一版，
 但也不假装它已经进过 1.0.8 的包。
 
+### 5u. 把"发链接→拿文稿"整条链在发布件上走了一遍，暴露三件事
+
+用本地桩模型（127.0.0.1，一次真调用都没有）在**装好的 1.0.8 wheel** 上跑真实命令行：
+
+- 正面：120 段 × 15 秒、30 分钟、`sourceKind=platform_auto` 的回传对象喂
+  `pvc push --out`，`ok=true`、8 个文件全在盘上（summary.md/.txt、chat.md、summary.json、
+  transcript.json/.txt/.srt/.vtt），SRT 里正好 120 条 ` --> ` 帧，出处标签是
+  "平台自动生成字幕（可能存在识别错误）"，桩被打到 3 次（切块 + 归并 + 终稿）。
+  这条正面链此前只在 checkout 里证过，现在在发布件上证了。
+- 反面 1（真缺陷）：同一时长只回传 20 段稀字时，工具**拒了**，但信封是
+  `code="error"`、`data` 里没有 hint。而 SKILL 的判定阶梯是按 `code` 分支的——
+  也就是说"你取早了"这个最重要的停手信号，在机器可读层面和一个内部 bug 长得一样。
+  现在：新增 `SparseTranscript`（`code=sparse_transcript`、HTTP 422），密度与段数两个分支
+  各自带上可执行的 hint（等页面播起来重取一次；仍然稀就把段数与时长报给用户并停下；
+  确实只有简介就必须显式 `page_text` 标注）。
+- 反面 2（文档写的花钱前确认，在手机端根本执行不了）：`pvc summarize --estimate-only`
+  必须**先拿到逐字稿**才能估算，匿名会话下它直接回 `needs_browser`，什么数都没给；
+  而这条路上真正会用的 `pvc push` 压根没有这个开关（`rc=2, unrecognized arguments`）。
+  现在 `push --estimate-only` 存在，且用与真实总结**同一套校验**（所以估算不会承诺一个
+  随后会被稀疏门禁拒绝的总结），一次模型都不调；配 `--service` 时它在 POST 之前就被拒，
+  因为那个端点一提交就开始花钱。
+- 反面 3（两处数字打架）：估算的信封正文写 `约 chunks+2 次`，`data.estimated_calls`
+  走 `estimate_calls()`（`total = chunks + reduce + 1`）。用户决定花不花钱时看的正是这个数，
+  所以两条命令现在共用一个 `_estimate_envelope`，措辞也改成诚实的"至少 N 次
+  （归并轮次要真正总结时才知道）"。
+- 自评包加了一个 `relay_arrived_too_thin` 控制项（reason=null 的薄回传 + 真实的
+  `sparse_transcript` 信封），并且把 §5p 那道执行测试的判据从"必须抛 EmptyTranscript"
+  扩成"reason 为空时必须是 SparseTranscript 且带 hint"，下限从 3 提到 4——
+  否则新的停止信号没人验收。
+
+我自己的两次 Edit 事故也记在这儿：一次把 `body = {` 两行吞掉、一次把
+`add_remote(push)` 挤到上一行造成语法错误，都在跑测试之前靠回读区域发现。
+教训是：多行锚点的 Edit 之后必须把那一段重新 grep 一遍，而不是相信 diff。
+
+1.0.9 带这些改动，因为它们改的是 agent 分支用的 `code` 与它决定花钱前看到的数。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

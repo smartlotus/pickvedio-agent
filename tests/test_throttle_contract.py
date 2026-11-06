@@ -201,11 +201,20 @@ def test_eval_pack_relay_reasons_execute_and_match_the_hint_map():
             continue
         payload = json.loads(fixture)
         reason = payload.get("reason")
-        assert reason, control["id"]
+        assert "data.hint" in " ".join(control.get("required_behaviour") or []), control["id"]
+        if reason is None:
+            # A relay that returned *some* text but far too little for the length
+            # is the other refusal the pack has to grade, and it must not be
+            # confused with "nothing usable arrived".
+            from pickvedio_core.errors import SparseTranscript
+
+            with pytest.raises(SparseTranscript) as caught:
+                to_transcript(SAMPLE_URL, fixture)
+            assert caught.value.hint, control["id"]
+            checked += 1
+            continue
         with pytest.raises(EmptyTranscript) as caught:
             to_transcript(SAMPLE_URL, fixture)
         assert caught.value.hint == RELAY_REASON_HINTS[reason], control["id"]
-        behaviour = " ".join(control.get("required_behaviour") or [])
-        assert "data.hint" in behaviour, f"{control['id']} grades no hint-following"
         checked += 1
-    assert checked >= 3, f"only {checked} reason fixtures executed; the pack lost its teeth"
+    assert checked >= 4, f"only {checked} relay fixtures executed; the pack lost its teeth"

@@ -284,6 +284,31 @@ def cmd_fetch(args) -> int:
     ))
 
 
+def _estimate_envelope(transcript, settings: Settings, style: str) -> dict[str, Any]:
+    """Plan the calls a transcript *would* cost, without making any.
+
+    Shared by `summarize --estimate-only` and `push --estimate-only` on purpose.
+    The two used to disagree: one said `chunks + 2` in prose while `data` carried
+    `estimate_calls`, so a user deciding whether to spend saw two numbers and no
+    way to tell which the tool would actually use. Only what is knowable here is
+    claimed -- the reduce rounds depend on chunk lengths, hence "at least".
+    """
+    prompt_set = load_prompts(style or settings.style, settings.prompt_dir)
+    from pickvedio_core.summarize import Summarizer, estimate_calls
+
+    chunks = Summarizer(prompt_set, client=None, chunk_chars=settings.chunk_chars,
+                        max_chunks=settings.max_chunks).chunks(transcript.segments)
+    plan = estimate_calls(len(chunks))
+    return envelope(
+        ok=True, code=OK,
+        message=(f"估算完成：{len(chunks)} 个切块，至少 {plan['total']} 次模型调用"
+                 "（归并轮次要真正总结时才知道），未花费任何额度。"),
+        title=transcript.title, duration=transcript.duration, chars=transcript.char_count,
+        chunks=len(chunks), estimated_calls=plan, profile=prompt_set.profile,
+        source=transcript.source.value,
+    )
+
+
 def cmd_push(args) -> int:
     """Send a relayed transcript to the service (or summarise it locally)."""
     settings = _settings(args)
@@ -302,6 +327,24 @@ def cmd_push(args) -> int:
         "name": args.transcript if args.transcript != "-" else "",
         "strict": not args.allow_sparse,
     }
+    if args.estimate_only:
+        # Order matters: the service branch below posts a real job and spends.
+        if remote is not None:
+            return emit(envelope(
+                ok=False, code="configuration",
+                message="--estimate-only 只在本地算：远端估算要先有逐字稿，而 `POST /v1/transcripts` "
+                        "一提交就会开始花钱。去掉 --service 用本地估算，或直接按用户同意后的流程提交任务。",
+                hint="本地估算后再决定是否提交任务；这一步不花任何额度。",
+            ))
+        if not url:
+            return emit(envelope(ok=False, code="configuration",
+                                 message="本地估算也必须提供 --url，否则报告里的出处无法确定。"))
+        from pickvedio_core.sources.relay import to_transcript
+
+        # Same validation the real run applies, so an estimate cannot promise a
+        # summary the sparse guard would later refuse.
+        relayed = to_transcript(url, payload, **meta)
+        return emit(_estimate_envelope(relayed.transcript, settings, args.style))
     if remote is not None:
         body = {
             "url": url,
@@ -431,19 +474,9 @@ def cmd_summarize(args) -> int:
     from pickvedio_core.sources.ladder import resolve
 
     resolution = resolve(url, settings, allow_asr=not args.no_asr, allow_page_text=args.allow_page_text)
-    transcript = resolution.transcript
-    prompt_set = load_prompts(args.style or settings.style, settings.prompt_dir)
-    from pickvedio_core.summarize import Summarizer, estimate_calls
-
-    chunks = Summarizer(prompt_set, client=None, chunk_chars=settings.chunk_chars,
-                        max_chunks=settings.max_chunks).chunks(transcript.segments)
-    return emit(envelope(
-        ok=True, code=OK,
-        message=f"估算完成：{len(chunks)} 个切块，约 {len(chunks) + 2} 次模型调用，未花费任何额度。",
-        title=transcript.title, duration=transcript.duration, chars=transcript.char_count,
-        chunks=len(chunks), estimated_calls=estimate_calls(len(chunks)),
-        profile=prompt_set.profile, attempts=resolution.trail,
-    ))
+    document = _estimate_envelope(resolution.transcript, settings, args.style)
+    document["data"]["attempts"] = resolution.trail
+    return emit(document)
 
 
 def _await_report(remote: _Remote, job_id: str, timeout: float) -> dict[str, Any]:
@@ -685,6 +718,8 @@ def build_parser() -> argparse.ArgumentParser:
     push.add_argument("--no-wait", action="store_true", help="只提交，不等待结果")
     add_format(push)
     push.add_argument("--allow-sparse", action="store_true", help="关闭稀疏内容拒绝（可能产出不可靠总结）")
+    push.add_argument("--estimate-only", action="store_true",
+                      help="只按同一套校验估算切块与调用数，不调用模型、不提交任务")
     add_remote(push)
     push.set_defaults(func=cmd_push)
 

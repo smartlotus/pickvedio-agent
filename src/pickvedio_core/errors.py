@@ -83,6 +83,20 @@ class RateLimited(PickvedioError):
             )
 
 
+class SparseTranscript(PickvedioError):
+    """Text arrived, but far too little of it for a video this long.
+
+    This used to be a bare ``PickvedioError``, so the envelope said ``error``
+    with no hint and the ladder -- which branches on ``code`` -- could not tell
+    "you extracted before the cues loaded" from an internal bug. Both sparse
+    failures (density and line count) carry a remedy in their message, and the
+    message is exactly what an agent on a phone cannot re-derive.
+    """
+
+    code = "sparse_transcript"
+    http_status = 422
+
+
 class AuthRequired(PickvedioError):
     """The content itself needs a logged-in session the user must supply."""
 

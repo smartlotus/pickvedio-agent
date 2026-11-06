@@ -73,8 +73,10 @@ https://github.com/smartlotus/pickvedio-agent
 
 4. 输出给我时正文就是 data.summary（手机对话用 --style brief 的短版），
    并且必须带一行出处：字幕来自哪一层（source）、可信度、段数、用了哪个模型；
-   data.warnings 非空时把它们也念出来。长视频用 pvc job create + pvc job wait，
-   不要同步等一个会超时的请求。
+   data.warnings 非空时把它们也念出来。长视频先用
+   `pvc push --url "<规范链接>" --transcript relay.json --estimate-only`
+   把切块数与"至少几次模型调用"报给我，我点头之后再真正总结；
+   执行时用 pvc job create + pvc job wait，不要同步等一个会超时的请求。
 
 5. 任何失败先贴命令、code、message、data.hint，再说你的判断；同一个错误不要连续重试超过两次。
 
@@ -162,7 +164,7 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
 ```bash
 curl -fsS "https://<域名>/healthz"                      # -> 200，免令牌
 curl -fsS "https://<域名>/v1/profiles" -H "Authorization: Bearer $PVC_API_TOKEN"
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.8"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.9"
                                                          # 这个名字不在 PyPI 上，必须带 git+ 地址；
                                                          # clone 过的话用 bash bootstrap.sh 更省事
 export PVC_SERVICE_URL="https://<域名>"
@@ -196,8 +198,12 @@ pvc push --url "https://www.bilibili.com/video/BV1rjKn6CETw/" \
 
 1. **不要把 key、`PVC_API_TOKEN`、Cookie 值发进聊天或写进日志。** `pvc status` 只报名字与
    布尔值，不报值。
-2. **花钱前先问。** ASR 与超长视频的分层总结会真扣钱；先 `pvc summarize --estimate-only`
-   看切块数与预计模型调用数（这一步不花任何额度）。
+2. **花钱前先问。** ASR 与超长视频的分层总结会真扣钱。手机端（字幕靠浏览器回传）真正能用的
+   估算是 `pvc push --url "<规范链接>" --transcript relay.json --estimate-only`：
+   它跑与真实总结完全相同的校验，报出切块数与"至少几次"模型调用，一次模型都不调。
+   `pvc summarize --estimate-only` 只在字幕通道本来就可达时才有意义——它得先拿到逐字稿，
+   而匿名会话里那一步就会回 `needs_browser`。
 3. **拿不到字幕就报失败**，不许用简介/标题/评论冒充视频内容。这条既是代码门禁
-   （`--allow-page-text` 默认关，回传内容过稀会被直接拒），也是
+   （`--allow-page-text` 默认关；回传内容太稀会拿到 `sparse_transcript`，
+   空内容会拿到 `empty_transcript`，两者都带 `data.hint` 说清下一步），也是
    [SKILL.md](../skills/video-summary/SKILL.md) 的第 7 条硬规则。
