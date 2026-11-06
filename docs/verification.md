@@ -466,6 +466,146 @@ wheel 内含 LICENSE 文件。
 
 出 1.0.2 就是为了让 pin、`install_spec()`、CI 拼出的地址与发布附件四者重新相等。
 
+## 5i. 门自己也会坏：CI 抓住的第二轮，和发布件的事后实测
+
+§5h 那道"文档 pin 必须等于 pyproject 版本"的 gate，第一次上 CI 就红了自己：
+扫描步骤的 unquoted heredoc 里插值的是 `$VERSION`，而 derive 步骤写进 `GITHUB_ENV`
+的名字是 `PVC_VERSION`——后者才会导出给后续步骤，前者在那个 step 里展开为空串，
+gate 于是报 "could not read a version out of pyproject.toml"（run 42246378362 的
+`Install (documented route)`，4060e12；工作区里一度出现的半截修复 `$PVC_VERSION`
+拼写也被同一个 run 判定不足）。修法不修拼写、修整类：heredoc 加引号，版本改从
+`pyproject.toml` 直接读，删掉"shell 传版本"这一整条路（b6ce80a）。同一个提交上
+CI 与 Docker 两个工作流全绿（run 42247626605 / 42247626406）。规律与 §5h 第 3 条
+一致：bug 总是长在"验证别人的那一侧"。
+
+v1.0.2 tag 在 4060e12 上推送，release.yml 于 41 秒后自行发布三件附件。b6ce80a
+只改了 `.github/workflows/`，而附件内容不包含 workflow 文件，所以发布件与修复后
+HEAD 构建结果一致，不重切。但"应该一致"不是证据，发布之后补了两条独立实测
+（与 CI 完全无关，本机执行）：
+
+1. 干净 venv、无任何令牌，`pip install "pickvedio-core[service] @
+   https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.2/pickvedio_core-1.0.2-py3-none-any.whl"`
+   —— 安装成功，`pvc --help` 正常，`pvc check` 报 `ok:true` / `network_used:false`，
+   `pickvedio_core.__version__ == "1.0.2"`。README 那句"匿名可下载，已实测 pip 能
+   取到并装上 1.0.2"在 4060e12 写下时是预测，此刻起才是测量。
+2. skill zip 匿名下载原样解包：正好 7 个条目；`SKILL.md` frontmatter 含 Muse 必需的
+   `name` / `description` / `icon` / `metadata` 四键；包内全部安装 pin 均为 `@v1.0.2`。
+
+dependabot 的 actions 升级 PR（#1）rebase 到 4060e12 之后，继承了同一个红 job；
+让它再 rebase 到 b6ce80a 上重跑，等绿再合，不盲并。
+
+这一节自己又当场添了一笔：它第一次落库没走 git，走了 Contents API——当时
+github.com:443 从写作者的机器上不可达，而 api.github.com 可达（提交信息里有括注）。
+API 直传磁盘原始字节，绕过 clean filter，blob 里带进了 505 个 CRLF；而
+`.gitattributes` 对 `*.md` 钉死 `eol=lf`，且文件开头自称 load-bearing。后果精确命中
+CI 里唯一会跨 commit checkout 的 job：`Install (documented route)` 用 pip 装这个
+git 依赖时，在**全新 clone** 里 `git checkout v1.0.2` 被 "docs/verification.md 有
+本地改动" 拒绝（run 42249523515）——全新 clone 不可能有本地改动，可能的只有磁盘
+字节与过滤器约定不一致。修复即本提交：重传 LF 归一后的字节。教训并入同一条：
+**绕过 git 的写入路径，同时绕过了 git 替你守住的字节约定**；上一条里"修类不修拼写"
+的原则，在这里的对应形态是"写入必须走会被过滤器看见的路"。
+
+## 5j. 产品自己在提示里给了 agent 一个不存在的开关
+
+用 1.0.2 的发布件对真站跑判定阶梯时，`pvc fetch` 返回 `code:"needs_browser"`，
+而它 `data.hint` 的第一条出路写的是：
+
+```
+然后 `pvc push --url <链接> --transcript relay.json --summarize`
+```
+
+`pvc push` 没有 `--summarize`（`pvc push --help` 里就数不出这个选项），照做的 agent
+只会拿到 argparse 的退出码 2——而这一行是整个产品被读得最多的一行字，
+每一个走到第二级的 agent 都会执行它，于是"需要已登录浏览器"这个真话
+被替换成"工具坏了"。同一类问题还有一处：`sources/__init__.py` 的模块 docstring
+宣称 `pvc fetch --channel`，`fetch` 也没有这个开关。
+
+修法不止改两句字。新增 `test_no_hint_or_doc_invents_a_pvc_flag`：
+
+- 用 `build_parser()` 反查每个子命令**真正**接受的选项集合；
+- 扫 `src/**.py`、`skills/**.md`、`docs`、`deploy`、`prompts`、README、AGENTS 里所有
+  `pvc <子命令> …` 出现处，抽出其中每一个 `--开关`，凡 parser 不认的就报文件与行号；
+- 今天的实际覆盖面是 95 个开关 / 56 行，测试里有 `checked >= 60` 的下限断言；
+- 负对照：把 `pvc push … --summarize` 原句喂给同一个分类器，必须判红。
+
+写这道门禁的过程中它自己错了两次，两次都是那条下限断言把我揪住的：第一次拿
+`a.choices` 去找子命令动作，命中了 `--format`（它的 choices 是个 list）而崩在 `.items()`；
+第二次用一层 `glob("*.md")`，`skills/video-summary/SKILL.md` 和 `src/**/ladder.py`
+根本没被读到，只"检查"了 10 个开关。另外 `pvc job` 不是嵌套 subparser，
+而是一个带位置参数的 parser，所以 `job create|status|wait|list` 统一按 `job` 的合法集合校验。
+
+文案改成真实存在的用法：`push` 建的就是总结任务，长视频的正确说法是
+`pvc push … --style brief` 之后 `pvc job wait --id <job_id>`。
+本地复验：ruff 干净，130 项测试 0 失败。
+
+## 5k. 一次"CI 全绿"是怎么把修好的东西撤回去的
+
+`dea74df`（只该改一段文档）把 `sources/ladder.py` 的 hint 修复和
+`tests/test_service_pipeline.py` 里的门禁**一起撤掉了**，CI 还是全绿。原因链是：
+`git rebase --autostash` 失败后把改动留在 stash 里、默认 index 停在旧 blob 上；
+我随后 `git add <一个文件> && git commit` 用的是那个**旧 index 的整体**，
+于是这一笔把别人的旧内容也提交了。而唯一会喊"hint 又变回去了"的那个测试，
+恰好和 hint 一起被撤回——门禁和它保护的东西死在同一笔提交里，
+所以"CI 绿"这件事在那一刻毫无信息量。
+
+发现方式不是看 CI，是把**远端 blob** 拉下来数：
+`gh api repos/.../contents/src/pickvedio_core/sources/ladder.py?ref=<remote sha>`
+里 `--transcript relay.json --summarize` 的出现次数（当时是 1，正确应为 0），
+以及测试文件里 `invents_a_pvc_flag` 是否存在（当时 0）。
+
+因此加了第二道、位置不同的闸：`Lint (ruff)` 作业里直接 grep 随包指令，
+出现那条不存在的命令形状就红（`docs/verification.md` 白名单，因为它按设计要引用坏例子；
+同一步还要求"对白名单文件本身必须能 grep 到"，防白名单吞掉检测）。
+工作流文件不参与修复本身，所以撤修复带不走这道闸。
+
+现在每次推送后都按远端 sha 复核内容，不再以本地 `git status` 干净为准
+（1b0fb71 的复核结果：bogus hint 0 次、门禁存在）。1.0.3 就是为了让**已发布附件**
+里的运行期 hint 也变成修正后的——1.0.2 的 wheel 里那条错话还在。
+
+## 5l. 开关扫描补上了 Muse 真正会读的那两类文件
+
+§5j 那道扫描只读 `.py` 和 `.md`。但 agent 实际照做的指令有两处不在这两类里：
+`skills/video-summary/manifest.yaml` 的 `cli_subcommands`（决定技能被允许调用哪些子命令）
+和 `eval/scenarios.yaml` 里逐条写死的 `call: 'pvc … --flag'`（Muse 用它自评），
+另外 `assets/browser-extract.js` 的说明里也给了一条 `pvc push …` 用法。
+
+现在的覆盖按文件类型数出来是：`.md` 91、`.py` 12、`.yaml` 18、`.js` 3，共 124 个开关引用，
+0 个非法。为了让这个数不能靠"其实什么都没扫"蒙过去，门禁做了三件事：
+
+- 阈值从 60 提到 110 —— 少了 `.yaml`/`.js` 这两类就达不到；
+- `\` 折行在扫描前拼回一行（README、deploy-runbook、eval 里都有续行写法），
+  所以续行里的开关也在合法集合里比对，行号相应指拼接后的流；
+- 新增一条独立断言：`cli_subcommands` 的每一个名字必须是 `build_parser()` 真有的子命令，
+  并且不允许重复。这条用正则而不是 PyYAML 解析，因为 PyYAML 在这仓库里是 CI 专用工具，
+  一个本地跑不起来的测试等于没人跑。
+
+## 5m. `--out` 在带服务的每一条路上都不写文件
+
+用户的原话是"总结一下并**输出文稿**"。实测（HEAD 代码 + 桩模型，零花费）：
+`pvc push … --out DIR` 返回 `ok:true`、退出码 0、`data.summary` 有内容，
+而 `DIR` 里 `files written: []`。
+
+根因不是拼写也不是路径：`write_all` 只在 `cmd_summarize` 的**本地**分支里被调用；
+`cmd_push`、`summarize --service`、`job wait` 全部汇到 `_emit_report`，那里只发
+envelope，不写盘。而部署形态下所有命令都走服务，所以文档里"要文档：`--out <目录>`
+会写全套文件"这一句，对 Muse 路线从来就不成立。本地 `push --out` 也一样不写
+（它只把 `write_artifacts` 传给 pipeline，那是写进 job 目录，不是 `--out`）。
+
+修法是收口到一个地方：`_emit_report` 在有 `--out` 且 payload 里还没有 `artifacts`
+时调用新的 `report.write_payload(payload, dir)`。刻意**不**从 JSON 重建 `Report`
+再本地重渲染：四个渲染文档（`summary.md/.txt`、`chat.md`、`summary.json`）逐字写
+服务返回的字节，只有 `transcript.json/.txt/.srt/.vtt` 由服务发来的 segments 重新生成
+（那三个是 segments 的纯函数，不存在口径漂移）。envelope 里同时回 `data.artifacts`，
+SKILL.md 的合同改成"有 `--out` 才有文件，回 8 个文件名；没有就别声称存在文稿"。
+
+负对照真跑了：把 `cli.py`/`report.py` 退回 HEAD（只留测试），
+`test_cli_push_with_out_writes_the_documents` 由 `rc=0` 变 `rc=1 FAILED`；
+之后按字节校验恢复（两个文件与备份完全一致）再跑回 `rc=0`。
+测试断言的是磁盘上的事实：8 个文件名集合相等、`summary.md` 逐字等于
+`data.report_markdown`、`transcript.srt` 里 ` --> ` 恰好 20 个、`transcript.vtt`
+以 `WEBVTT` 开头。
+
+## 6. 尚未验证 / still to verify after deployment
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

@@ -357,6 +357,134 @@ def test_cli_resolve_declares_a_short_link_instead_of_an_unexplained_empty_id(se
     assert "hint" not in direct["data"]
 
 
+def _pvc_flag_index():
+    """Map each `pvc` subcommand to the options it really accepts."""
+    import argparse
+
+    from pvc.cli import build_parser
+
+    parser = build_parser()
+    # `_SubParsersAction`, not "any action with choices": `--format` also has
+    # choices, and they are a list, which is what the first draft of this
+    # helper tripped over.
+    action = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    index = {"": {o for item in parser._actions for o in item.option_strings if o.startswith("--")}}
+
+    def collect(sub, path):
+        names = {o for item in sub._actions for o in item.option_strings if o.startswith("--")}
+        index[path] = names | index[""]
+        for nested in (a for a in sub._actions if isinstance(a, argparse._SubParsersAction)):
+            for name, child in nested.choices.items():
+                collect(child, f"{path} {name}".strip())
+
+    for name, sub in action.choices.items():
+        if hasattr(sub, "_actions"):
+            collect(sub, name)
+    return index
+
+
+def test_no_hint_or_doc_invents_a_pvc_flag():
+    """The `needs_browser` hint is the most-read line in this product.
+
+    It told every agent to run `pvc push ... --summarize`. `push` has no such
+    option: argparse exits 2, and the agent reports a broken tool instead of
+    following the ladder. Every command line written in the source, the skill
+    pack or the docs is now checked against the real parser, and the checker
+    must still catch a planted fake flag.
+    """
+    import re
+    from pathlib import Path
+
+    index = _pvc_flag_index()
+    root = Path(__file__).resolve().parents[1]
+    pattern = re.compile(
+        r"pvc (job (?:create|status|wait|list)|push|fetch|summarize|resolve|status|profiles|models|serve|check)\b"
+        r"([^`\n]*)"
+    )
+
+    # The manifest and the eval scenarios are the commands Muse is actually told
+    # to run, and browser-extract.js prints one in its own instructions -- none
+    # of that was in the first version of this scan, which only read .py and
+    # .md. A backslash-continued command is one command spread over lines, so the
+    # continuations are joined before matching; line numbers below therefore
+    # refer to the joined stream, which is fine because the message quotes the
+    # command itself.
+    files = [root / "README.md", root / "AGENTS.md"]
+    for directory, suffix in [(root / "src", "*.py"), (root / "docs", "*.md"),
+                              (root / "deploy", "*.md"), (root / "prompts", "*.md")]:
+        files.extend(sorted(directory.rglob(suffix)))
+    for directory in (root / "skills", root / "deploy"):
+        files.extend(sorted(directory.rglob("*.md")))
+        files.extend(sorted(directory.rglob("*.yaml")))
+        files.extend(sorted(directory.rglob("*.yml")))
+        files.extend(sorted(directory.rglob("*.js")))
+
+    bad = []
+    checked = 0
+    for path in files:
+        if not path.is_file() or "build" in path.parts or "__pycache__" in path.parts:
+            continue
+        if path.name == "verification.md":
+            continue  # the evidence ledger quotes broken commands on purpose, §5j
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix not in (".py", ".md"):
+            # python strings already sit on one line; in docs and shell snippets
+            # a `\`-continued command must be validated as a whole
+            text = re.sub(r"\\\n\s*", " ", text)
+        for number, line in enumerate(text.splitlines(), start=1):
+            for match in pattern.finditer(line):
+                command, tail = match.group(1), match.group(2)
+                flags = re.findall(r"(--[a-z][a-z0-9-]*)", tail)
+                if not flags:
+                    continue
+                checked += len(flags)
+                # `pvc job create|status|wait|list` is one parser with a
+                # positional action, not nested subparsers, so validate the
+                # whole "job wait" phrase against the "job" entry.
+                allowed = index.get(command)
+                if allowed is None and command.startswith("job "):
+                    allowed = index.get("job", set())
+                allowed = allowed or set()
+                for flag in flags:
+                    if flag not in allowed:
+                        bad.append(f"{path.relative_to(root)}:{number}: pvc {command} {flag}")
+
+    planted = "pvc push --url <链接> --transcript relay.json --summarize"
+    planted_match = pattern.search(planted)
+    assert planted_match, "the scanner no longer matches its own probe"
+    planted_flags = re.findall(r"(--[a-z][a-z0-9-]*)", planted_match.group(2))
+    assert "--summarize" in planted_flags and "--summarize" not in index["push"], "probe lost its teeth"
+
+    assert checked >= 110, f"only {checked} flags checked; the scanner is probably matching nothing"
+    assert not bad, f"invented pvc flags: {bad}"
+
+
+def test_manifest_lists_only_real_subcommands():
+    """Muse reads `cli_subcommands` to decide what the skill may invoke.
+
+    Parsed with a regex rather than YAML on purpose: PyYAML is a CI-only tool in
+    this repo (the skill job installs it separately), and a test that cannot run
+    locally is a test nobody runs before pushing.
+    """
+    import re
+    from pathlib import Path
+
+    from pvc.cli import build_parser
+
+    text = (Path(__file__).resolve().parents[1] / "skills/video-summary/manifest.yaml").read_text(
+        encoding="utf-8")
+    block = re.search(r"^cli_subcommands:\n((?:[ \t]*- [A-Za-z_][^\n]*\n?)+)", text, re.M)
+    assert block, "manifest.yaml no longer has a flat cli_subcommands list"
+    listed = re.findall(r"- ([A-Za-z_][A-Za-z0-9_-]*)", block.group(1))
+    assert listed, "cli_subcommands is empty"
+
+    parser = build_parser()
+    real = set(parser._subparsers._group_actions[0].choices)
+    assert listed == sorted(set(listed), key=listed.index), "duplicate subcommand in the manifest"
+    unknown = [name for name in listed if name not in real]
+    assert not unknown, f"manifest advertises subcommands that do not exist: {unknown}"
+
+
 def test_package_version_literal_matches_pyproject():
     """Two hand-edited version strings must not be able to disagree.
 
@@ -406,6 +534,41 @@ def test_cli_status_reports_missing_without_printing_secrets(settings):
     assert "service-token" not in dumped
     assert document["data"]["llm"]["api_key_present"] is True
     assert document["data"]["channels"]["page_text"]["enabled_by_default"] is False
+
+
+def test_cli_push_with_out_writes_the_documents(service_server, settings, tmp_path):
+    """`--out` has to produce files on the *service* path too.
+
+    This was the silent one: push against a deployed service exited 0, returned
+    a summary, and wrote nothing, because only cmd_summarize's local branch ever
+    called a writer. The user's ask is literally "send me the transcript", and
+    the Muse route always goes through the service.
+    """
+    out_dir = tmp_path / "docs"
+    document = run_cli([
+        "--service", service_server.base_url, "--token", "service-token",
+        "push", "--url", RELAY_URL, "--transcript", json.dumps(relay_body(count=20)),
+        "--title", "CLI 回传", "--duration", "160", "--source-kind", "up_subtitles",
+        "--style", "brief", "--out", str(out_dir),
+    ])
+    assert document["ok"] is True, document
+    data = document["data"]
+
+    expected = {"summary.md", "summary.txt", "summary.json", "chat.md",
+                "transcript.json", "transcript.txt", "transcript.srt", "transcript.vtt"}
+    on_disk = {path.name for path in out_dir.iterdir()}
+    assert on_disk == expected, on_disk
+    assert set(data["artifacts"]) == expected, data["artifacts"]
+
+    # The four rendered documents are the service's own bytes, not a local
+    # re-render: a file that disagrees with the chat reply is the failure mode.
+    assert (out_dir / "summary.md").read_text(encoding="utf-8") == data["report_markdown"]
+    assert (out_dir / "chat.md").read_text(encoding="utf-8") == data["chat_message"]
+
+    srt = (out_dir / "transcript.srt").read_text(encoding="utf-8")
+    assert srt.count(" --> ") == 20, srt[:120]
+    assert (out_dir / "transcript.vtt").read_text(encoding="utf-8").startswith("WEBVTT")
+    assert json.loads((out_dir / "transcript.json").read_text(encoding="utf-8"))[0]["text"]
 
 
 def test_cli_push_to_service_returns_a_report(settings, service_server):

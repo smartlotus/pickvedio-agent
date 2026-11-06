@@ -9,6 +9,7 @@ creator-authored subtitle track are not equally trustworthy.
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -154,6 +155,47 @@ def payload(report: Report) -> dict[str, Any]:
         "transcript_source_label": report.transcript_source_label,
         "transcript": json.loads(transcript_json(report.segments)),
     }
+
+
+def write_payload(report: dict[str, Any], directory: Path) -> dict[str, str]:
+    """Write the artefacts from a service report *payload* (the JSON document).
+
+    ``write_all`` needs a Report object, which a CLI call against a deployed
+    service does not have. Rebuilding one and re-rendering would produce files
+    that differ from the bytes the service stored -- the exact drift this
+    function exists to avoid. So the four rendered documents are written
+    verbatim from the payload, and only the three transcript sidecars are
+    regenerated, because those are pure functions of the segments the service
+    already sent.
+
+    Without this, ``--out`` was silently ignored on every service-backed command
+    (``push``, ``summarize --service``, ``job wait``), which is the whole point
+    of the phone workflow: "give me the document".
+    """
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    accepted = {field.name for field in dataclasses.fields(Segment)}
+    segments = [
+        Segment(**{key: value for key, value in item.items() if key in accepted})
+        for item in (report.get("transcript") or [])
+        if isinstance(item, dict) and item.get("text")
+    ]
+    outputs = {
+        "summary.md": str(report.get("report_markdown") or ""),
+        "summary.txt": str(report.get("report_text") or ""),
+        "chat.md": str(report.get("chat_message") or ""),
+        "summary.json": json.dumps(report, ensure_ascii=False, indent=2),
+        "transcript.json": transcript_json(segments),
+        "transcript.txt": timestamped_text(segments),
+        "transcript.srt": srt(segments),
+        "transcript.vtt": vtt(segments),
+    }
+    written: dict[str, str] = {}
+    for name, content in outputs.items():
+        path = directory / name
+        path.write_text(content, encoding="utf-8")
+        written[name] = str(path)
+    return written
 
 
 def write_all(report: Report, directory: Path, *, style_label: str = "") -> dict[str, str]:

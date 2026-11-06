@@ -357,6 +357,18 @@ def _emit_report(report: dict[str, Any], args, settings: Settings, *, job_id: st
     """
     report = {key: value for key, value in report.items()
               if key not in ("ok", "code", "message", "job_id")}
+    artifacts: dict[str, str] = {}
+    if getattr(args, "out", None) and not report.get("artifacts"):
+        # One place writes documents, so `--out` behaves the same whether the
+        # summary came from the local pipeline or from a deployed service.
+        # Before this, every service-backed command (push, summarize --service,
+        # job wait) accepted --out, exited 0 and wrote nothing at all. The
+        # `not report.get("artifacts")` guard keeps cmd_summarize's local path,
+        # which writes through write_all to keep the style label in the header.
+        from pickvedio_core.report import write_payload
+
+        artifacts = write_payload(report, Path(args.out))
+        report["artifacts"] = artifacts
     text_format = getattr(args, "format", "json")
     if text_format != "json":
         # The report already carries every rendering. Rebuilding a Report from
