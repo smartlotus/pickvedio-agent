@@ -579,6 +579,33 @@ git 依赖时，在**全新 clone** 里 `git checkout v1.0.2` 被 "docs/verifica
   并且不允许重复。这条用正则而不是 PyYAML 解析，因为 PyYAML 在这仓库里是 CI 专用工具，
   一个本地跑不起来的测试等于没人跑。
 
+## 5m. `--out` 在带服务的每一条路上都不写文件
+
+用户的原话是"总结一下并**输出文稿**"。实测（HEAD 代码 + 桩模型，零花费）：
+`pvc push … --out DIR` 返回 `ok:true`、退出码 0、`data.summary` 有内容，
+而 `DIR` 里 `files written: []`。
+
+根因不是拼写也不是路径：`write_all` 只在 `cmd_summarize` 的**本地**分支里被调用；
+`cmd_push`、`summarize --service`、`job wait` 全部汇到 `_emit_report`，那里只发
+envelope，不写盘。而部署形态下所有命令都走服务，所以文档里"要文档：`--out <目录>`
+会写全套文件"这一句，对 Muse 路线从来就不成立。本地 `push --out` 也一样不写
+（它只把 `write_artifacts` 传给 pipeline，那是写进 job 目录，不是 `--out`）。
+
+修法是收口到一个地方：`_emit_report` 在有 `--out` 且 payload 里还没有 `artifacts`
+时调用新的 `report.write_payload(payload, dir)`。刻意**不**从 JSON 重建 `Report`
+再本地重渲染：四个渲染文档（`summary.md/.txt`、`chat.md`、`summary.json`）逐字写
+服务返回的字节，只有 `transcript.json/.txt/.srt/.vtt` 由服务发来的 segments 重新生成
+（那三个是 segments 的纯函数，不存在口径漂移）。envelope 里同时回 `data.artifacts`，
+SKILL.md 的合同改成"有 `--out` 才有文件，回 8 个文件名；没有就别声称存在文稿"。
+
+负对照真跑了：把 `cli.py`/`report.py` 退回 HEAD（只留测试），
+`test_cli_push_with_out_writes_the_documents` 由 `rc=0` 变 `rc=1 FAILED`；
+之后按字节校验恢复（两个文件与备份完全一致）再跑回 `rc=0`。
+测试断言的是磁盘上的事实：8 个文件名集合相等、`summary.md` 逐字等于
+`data.report_markdown`、`transcript.srt` 里 ` --> ` 恰好 20 个、`transcript.vtt`
+以 `WEBVTT` 开头。
+
+## 6. 尚未验证 / still to verify after deployment
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

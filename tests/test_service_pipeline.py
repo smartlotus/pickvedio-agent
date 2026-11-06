@@ -536,6 +536,41 @@ def test_cli_status_reports_missing_without_printing_secrets(settings):
     assert document["data"]["channels"]["page_text"]["enabled_by_default"] is False
 
 
+def test_cli_push_with_out_writes_the_documents(service_server, settings, tmp_path):
+    """`--out` has to produce files on the *service* path too.
+
+    This was the silent one: push against a deployed service exited 0, returned
+    a summary, and wrote nothing, because only cmd_summarize's local branch ever
+    called a writer. The user's ask is literally "send me the transcript", and
+    the Muse route always goes through the service.
+    """
+    out_dir = tmp_path / "docs"
+    document = run_cli([
+        "--service", service_server.base_url, "--token", "service-token",
+        "push", "--url", RELAY_URL, "--transcript", json.dumps(relay_body(count=20)),
+        "--title", "CLI 回传", "--duration", "160", "--source-kind", "up_subtitles",
+        "--style", "brief", "--out", str(out_dir),
+    ])
+    assert document["ok"] is True, document
+    data = document["data"]
+
+    expected = {"summary.md", "summary.txt", "summary.json", "chat.md",
+                "transcript.json", "transcript.txt", "transcript.srt", "transcript.vtt"}
+    on_disk = {path.name for path in out_dir.iterdir()}
+    assert on_disk == expected, on_disk
+    assert set(data["artifacts"]) == expected, data["artifacts"]
+
+    # The four rendered documents are the service's own bytes, not a local
+    # re-render: a file that disagrees with the chat reply is the failure mode.
+    assert (out_dir / "summary.md").read_text(encoding="utf-8") == data["report_markdown"]
+    assert (out_dir / "chat.md").read_text(encoding="utf-8") == data["chat_message"]
+
+    srt = (out_dir / "transcript.srt").read_text(encoding="utf-8")
+    assert srt.count(" --> ") == 20, srt[:120]
+    assert (out_dir / "transcript.vtt").read_text(encoding="utf-8").startswith("WEBVTT")
+    assert json.loads((out_dir / "transcript.json").read_text(encoding="utf-8"))[0]["text"]
+
+
 def test_cli_push_to_service_returns_a_report(settings, service_server):
     """The relay entry point the Muse skill calls, driven through the CLI."""
     document = run_cli([

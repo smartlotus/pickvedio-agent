@@ -56,13 +56,13 @@ logged-in browser.
 ```bash
 bash bootstrap.sh                # 建 venv + 装依赖 + 离线自检，最后一行应是 verdict: READY
 python3 -m pip install -e '.[dev]'   # 手动等价做法（在仓库目录里）
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.3"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.4"
                                     # 不在仓库里时的安装法。注意：这个名字没有发到 PyPI，
                                     # `pip install pickvedio-core` 会报 No matching
                                     # distribution found —— 必须带 git+ 地址
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.3/pickvedio_core-1.0.3-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.4/pickvedio_core-1.0.4-py3-none-any.whl"
                                     # 机器上没有 git 时的等价做法：直接装 Release 附件，
-                                    # 匿名可下载，已实测 pip 能取到并装上 1.0.3
+                                    # 匿名可下载，已实测 pip 能取到并装上 1.0.4
 
 pvc check                        # 离线自检，不联网、不调用模型
 pvc status                       # 当前部署能用哪些通道，缺哪些环境变量

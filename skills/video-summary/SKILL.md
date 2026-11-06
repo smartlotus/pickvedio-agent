@@ -28,7 +28,7 @@ PyPI, so a bare `pip install pickvedio-core` fails with "No matching distributio
 found" and that is an install-path mistake, not a bug in the tool:
 
 ```bash
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.3"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.4"
 ```
 
 Extras go inside the bracket before the `@`:
@@ -71,7 +71,11 @@ Output contract:
   `data.confidence` (0-5). Blocked-unauthenticated is
   `ok:false, code:"needs_browser"` with the relay steps in `hint`.
 - `summarize` / `push` / `job wait` -> `data.summary` (Markdown),
-  `data.report_markdown`, `data.usage`. `push` and `job create` also return
+  `data.report_markdown`, `data.usage`. With `--out DIR` they also return
+  `data.artifacts`, a map of the eight file names actually written
+  (`summary.md/.txt/.json`, `chat.md`, `transcript.json/.txt/.srt/.vtt`) --
+  on the local pipeline and on a deployed service alike. No `--out`, no files:
+  attach nothing and say so rather than implying a document exists. `push` and `job create` also return
   `data.job_id`; if the object does not already carry a finished `data.summary`,
   continue with `pvc job wait --id <job_id> --timeout 600`.
 - `data.source` values and what they are worth: `up_subtitles` 5,
