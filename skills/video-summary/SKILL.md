@@ -28,7 +28,7 @@ PyPI, so a bare `pip install pickvedio-core` fails with "No matching distributio
 found" and that is an install-path mistake, not a bug in the tool:
 
 ```bash
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.12"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.13"
 ```
 
 Extras go inside the bracket before the `@`:
@@ -167,6 +167,21 @@ Credential storage:
   from the user's local Chrome: on modern Chrome that fails with "Failed to
   decrypt with DPAPI" (yt-dlp issue #10927) and it is not the right pattern --
   use the Muse browser relay instead.
+
+## Known codes
+
+`ok`, `queued`, `needs_browser`, `needs_auth`, `empty_transcript`,
+`sparse_transcript`, `rate_limited`, `network`, `model_error`, `configuration`,
+`dependency_missing`, `unauthorized`, `invalid_request`, `not_ready`,
+`not_running`, `cancelled`, `no_url`, `job_not_found`, `internal`, and the base
+`error` (an unclassified library failure -- treat it exactly like `internal`:
+paste it, stop, and do not dress it up as a configuration problem).
+
+Every one of these has a remedy written in `references/troubleshooting.md`, and a
+gate (`tests/test_code_vocabulary.py` in the repository) fails if the tool learns
+to print a code that no document explains. If a reply carries a code this list
+does not contain, say so and stop: inventing an interpretation of an unknown code
+is how a tool turns its own bug into the user's false confidence.
 
 ## Operating Rules
 

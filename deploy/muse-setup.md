@@ -176,7 +176,7 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
 ```bash
 curl -fsS "https://<域名>/healthz"                      # -> 200，免令牌
 curl -fsS "https://<域名>/v1/profiles" -H "Authorization: Bearer $PVC_API_TOKEN"
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.12"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.13"
                                                          # 这个名字不在 PyPI 上，必须带 git+ 地址；
                                                          # clone 过的话用 bash bootstrap.sh 更省事
 export PVC_SERVICE_URL="https://<域名>"

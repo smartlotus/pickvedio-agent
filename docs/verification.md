@@ -1071,6 +1071,39 @@ REST `digest` `ac0b43a6…` 相等，起真实 `pvc serve` 打真 HTTP）：
 需要单独定版本、改文档、并在 SKILL 的信封一节写清"成功回复也在 data 里"，
 不适合夹在这次修复里顺手做。
 
+### 5z. 20 个错误码里有 7 个没地方查，其中一个是我自己这两天新造出来的
+
+把"代码里真能打印的 code"与"agent 会读的那几份文档里出现的 code"做双向集合比对
+（脚本先跑一遍列出差异，再写成门禁）：
+
+- 代码侧共 **20** 个：`errors.py` 的 14 个类属性，加上散在 `cli.py` /
+  `service/app.py` / `pipeline.py` 里的字面量 —— 只扫 `errors.py` 会漏掉
+  `internal`、`no_url`、`not_running`、`invalid_request`、`queued`、`ok`。
+- 文档侧**完全没提**的有 7 个：`unauthorized`、`not_ready`、`cancelled`、
+  `internal`、`no_url`、`not_running`、`invalid_request`。
+  其中 `unauthorized` 与 `invalid_request` 是本轮把服务回复扁平化时**新造**的码：
+  修好一个合同的同时，悄悄给 agent 加了两个无处可查的分支。
+- SKILL 的判定阶梯是按 `code` 分支的，所以"文档没写这个码"不是缺一句说明，
+  而是那一支要靠猜——正是把工具的 bug 变成用户错误信心的那条路。
+
+补的：troubleshooting 表加 8 行（含 401 是连接器没带 Authorization 头、503 是故意
+fail-closed 而不是崩、422 `invalid_request` 去照 `/openapi.json` 的例子改 body、
+409 `not_ready` 是轮询太早要用 `job wait` 别紧密重试、`not_running` 说明任务已到终态、
+`cancelled` 不许把剩下的文本当完成总结、`internal` 当 bug 停下原样贴、
+`no_url` 要问用户要链接而不是按标题去搜）；SKILL.md 新增 `## Known codes` 段，
+把 20 个码全数列出，并写明"遇到这张表里没有的码就停下来说明"。
+
+新门禁 `tests/test_code_vocabulary.py`（5 个测试，先红后绿）：
+① 每个能打印的失败码都必须在 agent 文档里出现（带 planted 假码证明它会红）；
+② 文档里"看起来像码"的反引号词必须在代码里真存在（形状规则：含下划线或属于
+   已知单词表——第一版没这条，把字段名 `reason`、`subtitles` 误判成假码，
+   这也是我这次唯一一次"判据说得太宽"被自己的测试抓到）；
+③ `## Known codes` 这一段必须与代码侧集合**完全相等**，不是抽查——
+   一份只需"大致对"的清单会让人分不清"这码不存在"和"作者忘了更新"。
+
+1.0.13：这批文档就是 skill 包里 agent 必读的 `SKILL.md` 与 `references/`，
+不发版的话 Muse 拿不到这份词表。
+
 ## 6. 尚未验证 / still to verify after deployment
 - Nesting the *success* payloads of the meta endpoints under `data` (the error
   replies are flat since 1.0.12; `/v1/profiles` and friends still answer with
