@@ -397,6 +397,26 @@ def test_job_store_reuses_a_completed_result_for_the_same_link(settings, tmp_pat
     assert reused.id != record.id
 
 
+def test_service_is_importable_outside_the_checkout(tmp_path):
+    """Regression: CI shipped a green build while the entrypoint was uninstalled.
+
+    ``uvicorn service.app:app`` and ``pvc serve`` both resolve the app through
+    the *installed* package on a host. From the repo root the import also
+    succeeds when it is merely a sibling directory, so the assertion has to run
+    with a cwd that contains nothing.
+    """
+    import subprocess
+    import sys
+
+    probe = subprocess.run(
+        [sys.executable, "-c", "import service.app; print(service.app.__name__)"],
+        cwd=tmp_path, capture_output=True, text=True,
+    )
+    assert probe.returncode == 0, probe.stderr[-500:]
+    assert "service.app" in probe.stdout
+
+
+
 def _minimal_report():
     from pickvedio_core.models import Report, SourceKind
 

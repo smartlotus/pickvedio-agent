@@ -119,7 +119,7 @@ services:
         value: ""
       - key: PVC_CONFIG_FILE # optional JSON seed file for local use; unused on Render
         value: ""
-      - key: PVC_WORKERS # in-process job pool size (service/app.py, default 2)
+      - key: PVC_WORKERS # in-process job pool size (src/service/app.py, default 2)
         value: "2"
       - key: PVC_AUTOCREATE # must stay 1: `uvicorn service.app:app` builds the app at import
         value: "1"

@@ -92,7 +92,6 @@ RUN apt-get update \
 COPY pyproject.toml README.md ./
 COPY prompts ./prompts
 COPY src ./src
-COPY service ./service
 COPY deploy/healthcheck.py ./deploy/healthcheck.py
 
 # Library + console script (`pvc`) + the FastAPI/uvicorn extra. `media` adds

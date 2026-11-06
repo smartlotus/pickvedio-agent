@@ -166,7 +166,7 @@ ported byte-for-byte from the desktop app. Override any of them by dropping
 ```
 src/pickvedio_core/     library (urls, sources ladder, chunking, summarize, llm, asr, report, jobs, pipeline)
 src/pvc/cli.py          the JSON CLI
-service/app.py          FastAPI: /healthz /v1/jobs /v1/transcripts /v1/metadata /openapi.json
+src/service/app.py     FastAPI: /healthz /v1/jobs /v1/transcripts /v1/metadata /openapi.json
 skills/video-summary/   the Muse skill: SKILL.md, manifest.yaml, assets/browser-extract.js, references/, eval/
 deploy/                 Dockerfile companions, env.example, compose.yaml, muse-setup.md
 prompts/                optional template overrides

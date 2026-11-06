@@ -1,7 +1,7 @@
 # Docker build context for pickvedio-core.
 #
 # Only these paths are actually COPYed into the image:
-#   pyproject.toml  README.md  prompts/  src/  service/  deploy/healthcheck.py
+#   pyproject.toml  README.md  prompts/  src/  deploy/healthcheck.py
 # Everything below is excluded so the context stays small and so local junk
 # (venvs, downloaded video, secrets) can never leak into an image layer.
 #

@@ -7,7 +7,7 @@
 #
 # Deliberately LESS aggressive than .dockerignore: if Railway has to fall back
 # to a Nixpacks/Python build (no Dockerfile honoured, runtime.txt path), every
-# tracked source file must still reach the builder. So src/, service/,
+# tracked source file must still reach the builder. So src/ (which contains
 # prompts/, pyproject.toml and README.md are never excluded here -- only caches,
 # local state and secrets.
 

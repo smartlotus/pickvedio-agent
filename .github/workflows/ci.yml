@@ -51,7 +51,14 @@ jobs:
       - name: Import the ASGI app object the deploy targets
         # The Dockerfile, railway.json, render.yaml and fly.toml all name
         # `service.app:app`. Fail early if that import path drifts.
-        run: python -c "import service.app; print('service.app:app ok')"
+        # cd /tmp first: from the repo root a bare `import service.app` also
+        # succeeds when the package is NOT installed (the directory is right
+        # there), which is exactly how the last release shipped a broken
+        # entrypoint claim.
+        run: |
+          cd "$(mktemp -d)"
+          python -c "import service.app; print('service.app:app importable from site-packages')"
+          python -m pvc.cli --help >/dev/null
 
   test:
     name: Test (py${{ matrix.python-version }})

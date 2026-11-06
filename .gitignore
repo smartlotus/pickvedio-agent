@@ -7,7 +7,7 @@
 #   skills/**                 the Muse skill pack: SKILL.md, manifest.yaml,
 #                             references/*.md, assets/browser-extract.js, eval/
 #   docs/**                   human-facing docs
-#   service/**, src/**, tests/**
+#   src/**, tests/**
 #   deploy/env.example        documented template, not a secret
 # Beware unanchored patterns: `assets/`, `references/`, `data/`, `*.md` or a
 # bare `build` would swallow real source material here. Every directory pattern

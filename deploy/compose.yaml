@@ -67,7 +67,7 @@ services:
       PVC_ALLOW_UNKNOWN_PLATFORM: ${PVC_ALLOW_UNKNOWN_PLATFORM:-0}
       PVC_FFMPEG: ${PVC_FFMPEG:-}
       PVC_CONFIG_FILE: ${PVC_CONFIG_FILE:-}
-      # Service-process knobs (read by service/app.py, not by Settings):
+      # Service-process knobs (read by src/service/app.py, not by Settings):
       PVC_WORKERS: ${PVC_WORKERS:-2}
       PVC_AUTOCREATE: ${PVC_AUTOCREATE:-1}
     volumes:
