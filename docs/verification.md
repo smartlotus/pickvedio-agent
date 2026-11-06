@@ -562,6 +562,23 @@ git 依赖时，在**全新 clone** 里 `git checkout v1.0.2` 被 "docs/verifica
 （1b0fb71 的复核结果：bogus hint 0 次、门禁存在）。1.0.3 就是为了让**已发布附件**
 里的运行期 hint 也变成修正后的——1.0.2 的 wheel 里那条错话还在。
 
+## 5l. 开关扫描补上了 Muse 真正会读的那两类文件
+
+§5j 那道扫描只读 `.py` 和 `.md`。但 agent 实际照做的指令有两处不在这两类里：
+`skills/video-summary/manifest.yaml` 的 `cli_subcommands`（决定技能被允许调用哪些子命令）
+和 `eval/scenarios.yaml` 里逐条写死的 `call: 'pvc … --flag'`（Muse 用它自评），
+另外 `assets/browser-extract.js` 的说明里也给了一条 `pvc push …` 用法。
+
+现在的覆盖按文件类型数出来是：`.md` 91、`.py` 12、`.yaml` 18、`.js` 3，共 124 个开关引用，
+0 个非法。为了让这个数不能靠"其实什么都没扫"蒙过去，门禁做了三件事：
+
+- 阈值从 60 提到 110 —— 少了 `.yaml`/`.js` 这两类就达不到；
+- `\` 折行在扫描前拼回一行（README、deploy-runbook、eval 里都有续行写法），
+  所以续行里的开关也在合法集合里比对，行号相应指拼接后的流；
+- 新增一条独立断言：`cli_subcommands` 的每一个名字必须是 `build_parser()` 真有的子命令，
+  并且不允许重复。这条用正则而不是 PyYAML 解析，因为 PyYAML 在这仓库里是 CI 专用工具，
+  一个本地跑不起来的测试等于没人跑。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

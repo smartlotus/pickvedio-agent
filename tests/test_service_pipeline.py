@@ -401,22 +401,36 @@ def test_no_hint_or_doc_invents_a_pvc_flag():
         r"pvc (job (?:create|status|wait|list)|push|fetch|summarize|resolve|status|profiles|models|serve|check)\b"
         r"([^`\n]*)"
     )
+
+    # The manifest and the eval scenarios are the commands Muse is actually told
+    # to run, and browser-extract.js prints one in its own instructions -- none
+    # of that was in the first version of this scan, which only read .py and
+    # .md. A backslash-continued command is one command spread over lines, so the
+    # continuations are joined before matching; line numbers below therefore
+    # refer to the joined stream, which is fine because the message quotes the
+    # command itself.
+    files = [root / "README.md", root / "AGENTS.md"]
+    for directory, suffix in [(root / "src", "*.py"), (root / "docs", "*.md"),
+                              (root / "deploy", "*.md"), (root / "prompts", "*.md")]:
+        files.extend(sorted(directory.rglob(suffix)))
+    for directory in (root / "skills", root / "deploy"):
+        files.extend(sorted(directory.rglob("*.md")))
+        files.extend(sorted(directory.rglob("*.yaml")))
+        files.extend(sorted(directory.rglob("*.yml")))
+        files.extend(sorted(directory.rglob("*.js")))
+
     bad = []
     checked = 0
-    root_dirs = [(root / "src", "*.py"), (root / "skills", "*.md"), (root / "docs", "*.md"),
-                 (root / "deploy", "*.md"), (root / "prompts", "*.md")]
-    files = [root / "README.md", root / "AGENTS.md"]
-    for directory, suffix in root_dirs:
-        # rglob, not glob: `skills/video-summary/SKILL.md` is two levels deep, and
-        # the first draft of this scan silently read almost nothing -- which is
-        # exactly what the `checked >= 20` assertion below is there to catch.
-        files.extend(sorted(directory.rglob(suffix)))
     for path in files:
         if not path.is_file() or "build" in path.parts or "__pycache__" in path.parts:
             continue
         if path.name == "verification.md":
             continue  # the evidence ledger quotes broken commands on purpose, §5j
         text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix not in (".py", ".md"):
+            # python strings already sit on one line; in docs and shell snippets
+            # a `\`-continued command must be validated as a whole
+            text = re.sub(r"\\\n\s*", " ", text)
         for number, line in enumerate(text.splitlines(), start=1):
             for match in pattern.finditer(line):
                 command, tail = match.group(1), match.group(2)
@@ -441,8 +455,34 @@ def test_no_hint_or_doc_invents_a_pvc_flag():
     planted_flags = re.findall(r"(--[a-z][a-z0-9-]*)", planted_match.group(2))
     assert "--summarize" in planted_flags and "--summarize" not in index["push"], "probe lost its teeth"
 
-    assert checked >= 60, f"only {checked} flags checked; the scanner is probably matching nothing"
+    assert checked >= 110, f"only {checked} flags checked; the scanner is probably matching nothing"
     assert not bad, f"invented pvc flags: {bad}"
+
+
+def test_manifest_lists_only_real_subcommands():
+    """Muse reads `cli_subcommands` to decide what the skill may invoke.
+
+    Parsed with a regex rather than YAML on purpose: PyYAML is a CI-only tool in
+    this repo (the skill job installs it separately), and a test that cannot run
+    locally is a test nobody runs before pushing.
+    """
+    import re
+    from pathlib import Path
+
+    from pvc.cli import build_parser
+
+    text = (Path(__file__).resolve().parents[1] / "skills/video-summary/manifest.yaml").read_text(
+        encoding="utf-8")
+    block = re.search(r"^cli_subcommands:\n((?:[ \t]*- [A-Za-z_][^\n]*\n?)+)", text, re.M)
+    assert block, "manifest.yaml no longer has a flat cli_subcommands list"
+    listed = re.findall(r"- ([A-Za-z_][A-Za-z0-9_-]*)", block.group(1))
+    assert listed, "cli_subcommands is empty"
+
+    parser = build_parser()
+    real = set(parser._subparsers._group_actions[0].choices)
+    assert listed == sorted(set(listed), key=listed.index), "duplicate subcommand in the manifest"
+    unknown = [name for name in listed if name not in real]
+    assert not unknown, f"manifest advertises subcommands that do not exist: {unknown}"
 
 
 def test_package_version_literal_matches_pyproject():
