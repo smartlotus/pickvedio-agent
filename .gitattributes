@@ -1,0 +1,89 @@
+# Line-ending normalisation -- LOAD-BEARING IN THIS REPO, NOT COSMETIC
+#
+# Why this file matters here:
+#   The maintainer machine is Windows with `core.autocrlf=true`. Without
+#   .gitattributes, every text file a contributor writes lands in git with CRLF
+#   in the BLOB (autocrlf=true normalises on commit only for files git thinks
+#   are text, and `git add --renormalize` never ran here), which then produces
+#   three concrete failures in this specific project:
+#     1. The Dockerfile / sh snippets and the browser JS get checked out with
+#        CRLF on a Linux host (Railway/Render/Fly, GitHub Actions, the Muse VM).
+#        A `#` comment line is harmless, but a CRLF inside a Dockerfile `RUN`
+#        line continuation or a shebang breaks the build ("bad interpreter",
+#        `$'\r': command not found`).
+#     2. `skills/video-summary/references/*.md` and `prompts/*.md` are read
+#        verbatim into LLM prompts, and `assets/browser-extract.js` is
+#        eval'd in a browser page. CR characters change the bytes of a template
+#        that is documented as "byte-identical to the desktop defaults", and a
+#        CR can break JS ASI-sensitive lines.
+#     3. CI diffs (`ruff format --diff`, pytest fixture comparisons against
+#        files in tests/) fail on Windows contributors only -- the classic
+#        "passes locally, red on CI" loop.
+#   Normalising in git means the repository content is LF everywhere and
+#   autocrlf can no longer make the blob depend on one person's git config.
+#
+# If you clone on Windows and prefer CRLF working copies, `core.autocrlf=true`
+# keeps working as it does now; what stops varying is what gets *committed*.
+
+# ---- default: normalise text, checkout LF (predictable on Linux hosts) ----
+* text=auto eol=lf
+
+# ---- source / docs that must stay LF ----
+*.py text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.sh text eol=lf
+*.cfg text eol=lf
+*.ini text eol=lf
+
+Dockerfile text eol=lf
+.dockerignore text eol=lf
+.gitignore text eol=lf
+.railwayignore text eol=lf
+.gitattributes text eol=lf
+runtime.txt text eol=lf
+LICENSE text eol=lf
+
+# env templates must stay LF: they are fed to `docker compose --env-file`, and a
+# CR there silently becomes part of a variable value.
+deploy/env.example text eol=lf
+*.example text eol=lf
+*.env.example text eol=lf
+
+# ---- binary: never touch bytes ----
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.zip binary
+*.model binary
+*.bin binary
+*.onnx binary
+*.ct2 binary
+*.gz binary
+*.whl binary
+*.tar binary
+*.mp4 binary
+*.m4a binary
+*.mp3 binary
+*.wav binary
+*.ogg binary
+*.opus binary
+*.sqlite3 binary
+*.db binary
+
+# ---- diffs (cosmetic; helps review of the deploy files) ----
+pyproject.toml text eol=lf diff=toml
+*.yaml text eol=lf diff=yaml
+*.yml text eol=lf diff=yaml
+*.md text eol=lf diff=markdown
+*.json text eol=lf diff=json

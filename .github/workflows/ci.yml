@@ -1,0 +1,328 @@
+name: CI
+
+# Everything here is a gate on the repository as shipped: the library, the CLI,
+# the FastAPI service, the Muse skill pack and the container image. Nothing in
+# this workflow pushes anything anywhere (see .github/workflows/docker.yml and
+# release.yml for publishing).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project with dev extras
+        # Editable install so the `pvc` console script exists on PATH for the
+        # later steps of every job.
+        run: python -m pip install --upgrade pip && pip install -e '.[dev]'
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        # Formatting is advisory until the codebase settles; keep it visible but
+        # do not let a reformat block a deploy-critical fix.
+        continue-on-error: true
+        run: ruff format --check .
+
+      - name: Import the ASGI app object the deploy targets
+        # The Dockerfile, railway.json, render.yaml and fly.toml all name
+        # `service.app:app`. Fail early if that import path drifts.
+        run: python -c "import service.app; print('service.app:app ok')"
+
+  test:
+    name: Test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install project with dev extras
+        run: python -m pip install --upgrade pip && pip install -e '.[dev]'
+
+      - name: pvc --help exits 0
+        # Console-script smoke test: `pvc` must be on PATH and its entry point
+        # must import cleanly. Actions runs `bash -e`, so a non-zero exit fails
+        # the step; the file is dumped anyway so a traceback is visible.
+        run: |
+          pvc --help
+          echo "pvc --help OK"
+
+      - name: pvc check (offline self-test)
+        # `pvc check` is documented as a network-free run against the bundled
+        # fixture, so it needs no API key. If this step starts failing because
+        # something tried to reach the network, that is a bug in `check` -- do
+        # not paper over it with a dummy PVC_LLM_API_KEY.
+        run: pvc check
+
+      - name: pvc status is machine-readable
+        run: pvc status | python -c "import json,sys; d=json.load(sys.stdin); assert set(['ok','code','message','data']) <= set(d), d; print('envelope ok')"
+
+      - name: pytest
+        run: pytest -q
+
+  skill:
+    name: Skill pack (Muse)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # PyYAML is a CI-only tool here, not a runtime dependency of the package.
+      - name: Install yaml parser
+        run: python -m pip install --upgrade pip && pip install pyyaml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate SKILL.md frontmatter and manifest.yaml
+        run: |
+          python - <<'PY'
+          import sys
+          import yaml
+          from pathlib import Path
+
+          skill_dir = Path("skills/video-summary")
+          failures = []
+
+          # --- SKILL.md: --- frontmatter with the exact Muse keys ---
+          skill_md = skill_dir / "SKILL.md"
+          if not skill_md.is_file():
+              failures.append(f"{skill_md} is missing")
+          else:
+              text = skill_md.read_text(encoding="utf-8")
+              if not text.startswith("---\n"):
+                  failures.append("SKILL.md must start with a '---' frontmatter fence")
+              else:
+                  parts = text.split("---\n")
+                  # parts[0] == "" before the opening fence
+                  if len(parts) < 3:
+                      failures.append("SKILL.md frontmatter has no closing '---' fence")
+                  else:
+                      raw = parts[1]
+                      try:
+                          fm = yaml.safe_load(raw)
+                      except yaml.YAMLError as exc:
+                          failures.append(f"SKILL.md frontmatter is not parseable YAML: {exc}")
+                          fm = None
+                      if fm is not None:
+                          if not isinstance(fm, dict):
+                              failures.append("SKILL.md frontmatter must be a mapping")
+                          else:
+                              required = ["name", "description", "icon", "metadata"]
+                              for key in required:
+                                  if key not in fm:
+                                      failures.append(f"SKILL.md frontmatter missing key: {key}")
+                              for key in required:
+                                  if key in fm and fm[key] in (None, ""):
+                                      failures.append(f"SKILL.md frontmatter key empty: {key}")
+                              if "name" in fm and fm["name"] != skill_dir.name:
+                                  failures.append(
+                                      f"SKILL.md name {fm['name']!r} != directory {skill_dir.name!r}"
+                                  )
+                              if "metadata" in fm and not isinstance(fm["metadata"], dict):
+                                  failures.append("SKILL.md metadata must be a mapping")
+
+          # --- manifest.yaml: parses and carries the required connector keys ---
+          manifest = skill_dir / "manifest.yaml"
+          if not manifest.is_file():
+              failures.append(f"{manifest} is missing")
+          else:
+              try:
+                  data = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+              except yaml.YAMLError as exc:
+                  failures.append(f"manifest.yaml is not parseable YAML: {exc}")
+                  data = None
+              if data is not None:
+                  if not isinstance(data, dict):
+                      failures.append("manifest.yaml must be a mapping")
+                  else:
+                      required = [
+                          "version",
+                          "connector",
+                          "display_name",
+                          "description",
+                          "actions",
+                          "cli_subcommands",
+                          "consent_screen",
+                      ]
+                      for key in required:
+                          if key not in data:
+                              failures.append(f"manifest.yaml missing key: {key}")
+                      actions = data.get("actions")
+                      if isinstance(actions, dict):
+                          for tier in ("read", "write"):
+                              if tier not in actions:
+                                  failures.append(f"manifest.yaml actions missing tier: {tier}")
+                              else:
+                                  if "default" not in actions[tier]:
+                                      failures.append(
+                                          f"manifest.yaml actions.{tier}.default missing"
+                                      )
+                                  if "methods" not in actions[tier]:
+                                      failures.append(
+                                          f"manifest.yaml actions.{tier}.methods missing"
+                                      )
+
+          # --- eval scenarios parse too (they are YAML deliverables) ---
+          for extra in sorted(skill_dir.glob("eval/*.yaml")) + sorted(
+              skill_dir.glob("references/*.md")
+          ):
+              if extra.suffix != ".yaml":
+                  continue
+              try:
+                  yaml.safe_load(extra.read_text(encoding="utf-8"))
+              except yaml.YAMLError as exc:
+                  failures.append(f"{extra} is not parseable YAML: {exc}")
+
+          if failures:
+              print("::error::skill pack validation failed")
+              for line in failures:
+                  print(" -", line)
+              sys.exit(1)
+          print("skill pack OK")
+          PY
+
+      - name: node --check browser-extract.js
+        # The relay tier is evaluated inside a browser page; a syntax error there
+        # is the single most expensive failure mode in this repo, because it
+        # silently breaks the only transcript path that works from a datacenter IP.
+        run: node --check skills/video-summary/assets/browser-extract.js
+
+      - name: references exist and are linked from SKILL.md
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+
+          skill = Path("skills/video-summary")
+          text = (skill / "SKILL.md").read_text(encoding="utf-8")
+          missing = [
+              rel
+              for rel in (
+                  "references/browser-extract.md",
+                  "references/deploy-runbook.md",
+                  "references/troubleshooting.md",
+                  "assets/browser-extract.js",
+              )
+              if not (skill / rel).is_file()
+          ]
+          unlinked = [
+              rel for rel in ("references/deploy-runbook.md", "references/browser-extract.md")
+              if rel not in text
+          ]
+          if missing or unlinked:
+              print("::error::skill pack references broken")
+              for item in missing + unlinked:
+                  print(" -", item)
+              sys.exit(1)
+          print("references OK")
+          PY
+
+  docker:
+    name: Docker image (build only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the default relay-path image
+        # No push here. Same command the README documents:
+        #   docker build -t pickvedio-core .
+        run: docker build -t pickvedio-core:ci .
+
+      - name: Validate the compose file
+        run: docker compose -f deploy/compose.yaml config --quiet
+
+      - name: Start the image and hit /healthz
+        # Proves the ENTRYPOINT/PORT/uvicorn contract and that /healthz needs no
+        # token. PVC_API_TOKEN is a throwaway CI value, not a secret.
+        run: |
+          docker run -d --name pvc-ci -p 8080:8080 \
+            -e PORT=8080 \
+            -e PVC_API_TOKEN=ci-only-token \
+            -e PVC_LLM_PROVIDER=deepseek \
+            -e PVC_WORKDIR=/tmp/pvc-work \
+            pickvedio-core:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8080/healthz; then
+              echo
+              break
+            fi
+            if [ "$i" = "30" ]; then
+              docker logs pvc-ci
+              exit 1
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8080/openapi.json > /dev/null && echo "openapi ok"
+
+      - name: /v1 requires the bearer token
+        # An unauthenticated /v1 call must NOT succeed: it is the difference
+        # between a personal service and a free summariser for the whole internet.
+        run: |
+          if curl -sS -o /dev/null -w '%{http_code}' \
+              -X POST http://127.0.0.1:8080/v1/jobs \
+              -H 'content-type: application/json' \
+              -d '{"url":"https://www.bilibili.com/video/BV1rjKn6CETw/"}' | grep -q '^2'; then
+            echo "::error::/v1/jobs answered without a token"
+            exit 1
+          fi
+          echo "auth gate ok"
+
+      - name: pvc --help inside the image
+        run: docker run --rm --entrypoint pvc pickvedio-core:ci --help
+
+      - name: Build the optional ffmpeg image variant
+        # The ASR path is opt-in and heavy; keep the build green but do not
+        # smoke-test transcription here (that would need network + money).
+        timeout-minutes: 20
+        run: docker build -t pickvedio-core:ci-ffmpeg --build-arg INCLUDE_FFMPEG=1 .
+
+      - name: ffmpeg exists only in the variant
+        run: |
+          docker run --rm --entrypoint sh pickvedio-core:ci -c \
+            'command -v ffmpeg >/dev/null 2>&1 && echo "unexpected ffmpeg" && exit 1 || echo "default image has no ffmpeg (correct)"'
+          docker run --rm --entrypoint sh pickvedio-core:ci-ffmpeg -c \
+            'command -v ffmpeg >/dev/null && ffmpeg -version | head -n 1'
+
+      - name: Runs as non-root
+        run: |
+          user=$(docker run --rm --entrypoint id pickvedio-core:ci -u)
+          echo "container uid=$user"
+          [ "$user" != "0" ]

@@ -1,0 +1,133 @@
+# gitignore for pickvedio-core
+#
+# RULE OF THIS FILE: ignore generated things, never deliverables.
+# These directories ARE deliverables and must stay tracked, so nothing here may
+# match inside them:
+#   prompts/*.md              editable summary templates (PVC_PROMPT_DIR)
+#   skills/**                 the Muse skill pack: SKILL.md, manifest.yaml,
+#                             references/*.md, assets/browser-extract.js, eval/
+#   docs/**                   human-facing docs
+#   service/**, src/**, tests/**
+#   deploy/env.example        documented template, not a secret
+# Beware unanchored patterns: `assets/`, `references/`, `data/`, `*.md` or a
+# bare `build` would swallow real source material here. Every directory pattern
+# below is either specific enough to be unambiguous or explicitly anchored.
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+/MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# build / packaging output (setuptools writes ./build and ./dist)
+/build/
+/dist/
+/wheelhouse/
+*.tar.gz
+*.whl
+
+# ---- virtualenvs / interpreter state ----
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+!deploy/env.example
+.python-version
+Pipfile.lock
+
+# ---- test / lint / type caches ----
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+nosetests.xml
+.tox/
+.nox/
+
+# ---- this project's own runtime artifacts ----
+# Default PVC_WORKDIR (job state, transcripts, chunk summaries, reports).
+# A deployment may point PVC_WORKDIR elsewhere (/data in the container); if it
+# does, add that path here too. Everything below is anchored or named
+# specifically, so it can never swallow a source package that happens to share
+# a word (e.g. a future src/pickvedio_core/jobs/ or /models/ package).
+pickvedio-work/
+*.sqlite3
+*.sqlite
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# downloaded media — only exists on the optional ASR path, never commit it
+*.mp4
+*.mkv
+*.webm
+*.m4s
+*.m4v
+*.flv
+*.ts
+*.m3u8
+*.m4a
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.opus
+*.aac
+audio_cache/
+
+# generated reports (the service also writes them under the workdir)
+*.report.md
+/reports/
+/out/
+/smoke.json
+
+# cookies / credentials — never commit a logged-in session
+cookies.txt
+*.cookies.txt
+secrets.json
+.pickvedio/
+.pvc.env
+
+# local model weights (faster-whisper / CTranslate2 downloads)
+*.ctranslate2
+/models/
+
+# ---- editors / IDE ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.settings/
+*.sublime-workspace
+*.sublime-project
+.qoder/
+
+# ---- OS / shell noise ----
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.log
+logs/
+/tmp/
+/celerybeat-schedule

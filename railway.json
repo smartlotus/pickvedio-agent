@@ -1,0 +1,20 @@
+{
+  "_comment": "Railway config-as-code. JSON has no comment syntax, so notes live in these '_comment' / '_comment_*' keys: Railway's config decoder ignores unknown fields, and every real key below is part of the railway.json schema. The alternative to this file is the dashboard UI: service -> Settings -> Build (Build Type = Dockerfile, Dockerfile Path = ./Dockerfile) and Settings -> Deploy (Startup/Deploy Command, Healthcheck Path = /healthz, Healthcheck Timeout, Restart Policy, Replicas). Railway reads the UI values and railway.json together; if the two disagree, prefer ONE of them -- most people delete this file and keep the UI, or keep this file and never touch the Deploy settings. Both are equivalent; the deploy is reproducible only with this file. SECRETS DO NOT BELONG HERE: PVC_API_TOKEN, PVC_LLM_API_KEY, PVC_ASR_API_KEY and PVC_BILIBILI_SESSDATA go in Railway's Variables tab (private variables, or a Vault service). Never commit a value, never paste one into the Muse chat, and never put them in buildCommand/startCommand where they end up in a public build log.",
+  "build": {
+    "builder": "RAILPACK",
+    "dockerfilePath": "Dockerfile",
+    "_comment": "RAILPACK honours the committed Dockerfile (including the INCLUDE_FFMPEG build arg, which stays 0 for the relay-only default). To force a plain Python/Nixpacks build instead, set builder to \"NIXPACKS\" and let runtime.txt choose Python 3.12 -- but then there is no ffmpeg and no apt, so only the browser-relay + LLM path exists. That is a legitimate free-tier shape, just not the full image."
+  },
+  "deploy": {
+    "startCommand": "uvicorn service.app:app --host 0.0.0.0 --port \"$PORT\"",
+    "_comment_startCommand": "Equivalent to the image ENTRYPOINT, spelled out so Railway's 'Deploy Command' field is unambiguous. Railway injects $PORT; the app is the ASGI object service.app:app, and job state lives under $PVC_WORKDIR (set /data plus a volume). If you leave this field empty Railway uses the Dockerfile ENTRYPOINT, which does exactly the same thing.",
+    "_comment_buildCommand": "Do not add a buildCommand that pip-installs with secrets in it; the Dockerfile already installs `.[service,media]`.",
+    "healthcheckPath": "/healthz",
+    "healthcheckTimeout": 300,
+    "_comment_healthcheck": "/healthz needs no Authorization header, so health checks never carry the token. A 3-hour video cannot be summarised inside one HTTP request: the API is job-based (POST /v1/jobs returns immediately with a job_id, clients poll GET /v1/jobs/{id}), which is why a normal gateway timeout is not a deployment bug.",
+    "restartPolicyType": "ALWAYS",
+    "restartPolicyMaxRetries": 10,
+    "numReplicas": 1,
+    "_comment_restartPolicyType": "ALWAYS keeps a single-user personal service reachable; use ON_FAILURE if you want Railway to stop restarting a crash loop. Railway free/trial credit plans do NOT sleep on idle, but they do run out of credit -- watch Usage. On a plan with ephemeral storage, /data is lost on redeploy unless you attach a Volume (Service -> right click -> Attach Volume -> mount path /data); PVC_WORKDIR must point at that mount."
+  }
+}

@@ -1,0 +1,108 @@
+# fly.io config for pickvedio-core
+#
+# Dashboard / CLI alternative to this file: `fly launch` writes its own
+# fly.toml from the detected Dockerfile, and the fly.io dashboard's
+# Settings -> Runtime & deployment screen holds the same values (restart
+# policy, machine size, volume, "App settings -> Secrets"). Secrets are set
+# with `fly secrets set PVC_API_TOKEN=... PVC_LLM_API_KEY=...` -- never in this
+# file, because fly.toml is committed. Deploy sequence:
+#   fly launch && fly scale count 1
+#   fly volume create pvc_data -r nrt --snapshot-retention 7
+#   fly secrets set ...        # then
+#   fly deploy
+# The volume must exist before the first deploy that uses [mounts], otherwise
+# `fly deploy` creates it in the app's primary region with the default 1 GB.
+#
+# WHY FLY IS THIRD, NOT FIRST
+#   The intended deployer is Meta's Muse, which has a Railway connector ("Deploy
+#   and host what you build, including a GitHub repo, from chat"), so Railway is
+#   the chat-deployable route; Render is kept as a second option. Fly is here for
+#   people who already have the `fly` CLI, and it is the cheapest of the three
+#   ways to get a genuinely persistent /data.
+#
+# THE TRANSCRIPT DOES NOT COME FROM THIS CONTAINER
+#   YouTube bot-gates datacenter IPs and Bilibili serves AI subtitles only to a
+#   logged-in session, so the default production path is the browser relay: a
+#   logged-in agent browser POSTs segments to /v1/transcripts. No ffmpeg, no
+#   yt-dlp, no ASR key needed. The paid audio path additionally requires building
+#   the image with --build-arg INCLUDE_FFMPEG=1 (Fly cannot pass build args from
+#   fly.toml; use a pushed image or `fly deploy --build-arg` if your flyctl
+#   version supports it). Long videos are handled by async jobs
+#   (POST /v1/jobs -> job_id -> poll /v1/jobs/{id}), never by holding one request
+#   open past the proxy timeout.
+#
+# Cost honesty: Fly has no permanently free app tier. shared-cpu-1x/256-512 MB
+# runs the relay path comfortably; idle machines can be stopped
+# (auto_stop_machines = "stop") at the cost of a cold start.
+
+app = "pickvedio-core"
+primary_region = "nrt"
+kill_signal = "SIGINT"
+kill_timeout = 5
+
+# Single machine: job state lives on the mounted volume below, and running two
+# replicas would give each its own view of /data.
+auto_stop_machines = "stop"
+auto_start_machines = true
+min_machines_running = 0
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  PVC_WORKDIR = "/data"
+  PVC_KEEP_MEDIA = "0"
+  PVC_CHUNK_CHARS = "9000"
+  PVC_MAX_MINUTES = "180"
+  PVC_STYLE = "general"
+  # PVC_API_TOKEN / PVC_LLM_* / PVC_ASR_* / PVC_BILIBILI_SESSDATA are secrets:
+  # `fly secrets set` (or the dashboard), not this table.
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[mounts]
+  source = "pvc_data"
+  destination = "/data"
+  # /data holds job ids, transcripts and generated reports. With this mount a
+  # restart or redeploy keeps them; without it, re-run the job rather than
+  # quoting an old job_id.
+
+# Restart policy has no fly.toml key: set it on the machine instead,
+#   fly machine update <id> --restart-policy=always
+# which is the equivalent of Railway's deploy.restartPolicyType = "ALWAYS".
+
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
+  processes = ["app"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = 80
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = 443
+
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "30s"
+
+  [[services.http_checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "60s"
+    restarting_limit = 3
+    method = "get"
+    path = "/healthz"
+    # /healthz is the only route with no bearer-token requirement, so a check
+    # can never leak PVC_API_TOKEN into Fly's event log.

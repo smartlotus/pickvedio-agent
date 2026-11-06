@@ -1,0 +1,145 @@
+# Local Docker Compose for pickvedio-core -- the same image and the same
+# variables as the hosted deployment, so a bug found locally is the same bug.
+#
+#   cp deploy/env.example .env                     # then fill the two secrets
+#   docker compose -f deploy/compose.yaml up --build
+#   curl -fsS http://127.0.0.1:8080/healthz
+#
+#   # optional heavy path: also start a self-hosted OpenAI-compatible whisper
+#   # server (multi-GB image + model weights; skip it unless you really want
+#   # speech-to-text locally):
+#   docker compose -f deploy/compose.yaml --profile asr up --build
+#
+# Paths are relative to this file, so `context: ..` = the repo root.
+# Interpolated ${VAR:-default} values come from the shell environment or from a
+# .env next to this file (compose also accepts `--env-file deploy/env.example`).
+
+name: pickvedio
+
+services:
+  pvc:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      # The relay/default path needs no ffmpeg. Flip to "1" for the paid ASR
+      # path (audio cutting); it adds roughly 400 MB to the image.
+      args:
+        INCLUDE_FFMPEG: "0"
+        PYTHON_VERSION: "3.12"
+    image: pickvedio-core:local
+    container_name: pickvedio-core
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      # ---- secrets: only ever from the environment / .env ----
+      PVC_API_TOKEN: ${PVC_API_TOKEN:-}
+      PVC_LLM_API_KEY: ${PVC_LLM_API_KEY:-}
+      PVC_ASR_API_KEY: ${PVC_ASR_API_KEY:-}
+      PVC_BILIBILI_SESSDATA: ${PVC_BILIBILI_SESSDATA:-}
+      PVC_COOKIE_FILE: ${PVC_COOKIE_FILE:-}
+      # ---- summariser ----
+      PVC_LLM_PROVIDER: ${PVC_LLM_PROVIDER:-deepseek}
+      PVC_LLM_BASE_URL: ${PVC_LLM_BASE_URL:-}
+      PVC_LLM_MODEL: ${PVC_LLM_MODEL:-}
+      PVC_LLM_TEMPERATURE: ${PVC_LLM_TEMPERATURE:-0.2}
+      PVC_LLM_MAX_TOKENS: ${PVC_LLM_MAX_TOKENS:-2600}
+      # ---- ASR: disabled unless PVC_ASR_PROVIDER is set ----
+      PVC_ASR_PROVIDER: ${PVC_ASR_PROVIDER:-}
+      PVC_ASR_BASE_URL: ${PVC_ASR_BASE_URL:-}
+      PVC_ASR_MODEL: ${PVC_ASR_MODEL:-}
+      PVC_ASR_MAX_MINUTES: ${PVC_ASR_MAX_MINUTES:-180}
+      # Secondary ASR tuning knobs keep their code defaults here (see
+      # deploy/env.example for PVC_ASR_LANGUAGE / PVC_ASR_CHUNK_SECONDS /
+      # PVC_ASR_VAD / PVC_WHISPER_BEAM_SIZE / PVC_*_TIMEOUT); add a line when you
+      # actually need to change one.
+      PVC_OLLAMA_URL: ${PVC_OLLAMA_URL:-}
+      PVC_OLLAMA_MODEL: ${PVC_OLLAMA_MODEL:-}
+      # ---- shape and cost of a job ----
+      PVC_WORKDIR: ${PVC_WORKDIR:-/data}
+      PVC_CHUNK_CHARS: ${PVC_CHUNK_CHARS:-9000}
+      PVC_MAX_CHUNKS: ${PVC_MAX_CHUNKS:-40}
+      PVC_MAX_MINUTES: ${PVC_MAX_MINUTES:-180}
+      PVC_STYLE: ${PVC_STYLE:-general}
+      PVC_PROMPT_DIR: ${PVC_PROMPT_DIR:-}
+      PVC_KEEP_MEDIA: ${PVC_KEEP_MEDIA:-0}
+      PVC_ALLOW_UNKNOWN_PLATFORM: ${PVC_ALLOW_UNKNOWN_PLATFORM:-0}
+      PVC_FFMPEG: ${PVC_FFMPEG:-}
+      PVC_CONFIG_FILE: ${PVC_CONFIG_FILE:-}
+      # Service-process knobs (read by service/app.py, not by Settings):
+      PVC_WORKERS: ${PVC_WORKERS:-2}
+      PVC_AUTOCREATE: ${PVC_AUTOCREATE:-1}
+    volumes:
+      # Named volume == the "attach a volume" instruction for Railway/Fly.
+      # Job state (PVC_WORKDIR=/data) survives `docker compose restart` here.
+      - pvc-data:/data
+      # Read-only prompt overrides. Inert unless you also set
+      # PVC_PROMPT_DIR=/opt/pvc/prompts (see deploy/env.example); comment this
+      # line out if you never edit prompt templates.
+      - ../prompts:/opt/pvc/prompts:ro
+    healthcheck:
+      # The image already declares a HEALTHCHECK; this restates it so
+      # `docker compose ps` and `depends_on: condition: service_healthy` work.
+      test: ["CMD", "python", "/app/deploy/healthcheck.py"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+    # If you enable the local ASR profile, start it first. `required: false`
+    # needs Docker Compose >= 2.24 (the asr service is normally absent because
+    # it sits behind a profile); on an older compose, delete this whole
+    # depends_on block and start asr manually.
+    depends_on:
+      asr:
+        condition: service_started
+        required: false
+
+  # ---------------------------------------------------------------------------
+  # OPTIONAL, and deliberately behind a profile: self-hosted OpenAI-compatible
+  # speech-to-text. This is the HEAVY path -- a multi-GB image plus model
+  # weights on first start -- and it is NOT used at all by the default
+  # browser-relay flow. It exists so a long video with NO subtitles anywhere can
+  # still be transcribed without sending audio to a paid API.
+  #
+  # Image: dcouveau/bootrun-asr-amd-cpu (Bootrun ASR Server, CTranslate2/whisper
+  # large-v3, exposes POST /v1/audio/transcriptions). VERIFY the tag and the
+  # listening port against the upstream README before first run: this project
+  # does not build or test this image in CI, and the ASR server is an operator
+  # choice, not a dependency of pickvedio-core.
+  #
+  # Then set, for the pvc service:
+  #   PVC_ASR_PROVIDER=local_server
+  #   PVC_ASR_BASE_URL=http://asr:8000/v1
+  #   PVC_ASR_MODEL=large-v3
+  # (PVC_ASR_API_KEY may stay empty; this server does not authenticate, so keep
+  # it on the compose network only and never publish its port to the internet.)
+  #
+  # Lighter alternative with no second container: `pip install .[local-asr]` and
+  # PVC_ASR_PROVIDER=faster_whisper -- in-process, no HTTP, no ffmpeg server,
+  # but it needs the ffmpeg-enabled image to cut audio.
+  # ---------------------------------------------------------------------------
+  asr:
+    profiles: ["asr"]
+    image: dcouveau/bootrun-asr-amd-cpu:latest
+    container_name: pickvedio-asr
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000" # localhost only -- this service has no auth
+    environment:
+      CTS_MODEL: "large-v3"
+      CTS_PORT: "8000"
+      ASR_LISTEN_PORT: "8000"
+      # Keep the default CPU threads; raise only on a big box.
+      OMP_NUM_THREADS: "4"
+    volumes:
+      # Model weights cache, so a restart does not re-download gigabytes.
+      - pvc-asr-models:/home/user/models
+    healthcheck:
+      disable: true # upstream image has no stable health endpoint
+
+volumes:
+  pvc-data:
+    name: pvc-data
+  pvc-asr-models:
+    name: pvc-asr-models

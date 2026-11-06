@@ -1,0 +1,65 @@
+# Railway ignore list.
+#
+# When Railway builds from the committed Dockerfile (railway.json ->
+# build.builder = "RAILPACK", build.dockerfilePath = "Dockerfile") the Docker
+# context rules in .dockerignore apply, and this file is consulted for the
+# `railway up` CLI upload and for Nixpacks fallback builds.
+#
+# Deliberately LESS aggressive than .dockerignore: if Railway has to fall back
+# to a Nixpacks/Python build (no Dockerfile honoured, runtime.txt path), every
+# tracked source file must still reach the builder. So src/, service/,
+# prompts/, pyproject.toml and README.md are never excluded here -- only caches,
+# local state and secrets.
+
+.git/
+.github/
+.idea/
+.vscode/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# local runtime state -- never upload a workdir or a session
+pickvedio-work/
+/data/
+*.sqlite3
+*.db
+*.log
+.env
+.env.local
+.env.*.local
+cookies.txt
+*.cookies.txt
+
+# downloaded media / generated reports (optional ASR path)
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.opus
+*.report.md
+
+# docs and skills are tracked deliverables but are not needed to build the
+# service image; keep them out of the upload to save time. (Remove these two
+# lines if you ever deploy the skill pack itself through Railway.)
+docs/
+skills/
+
+# OS noise
+.DS_Store
+Thumbs.db

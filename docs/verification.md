@@ -1,0 +1,178 @@
+# 实测证据 / Verification evidence
+
+本文只记录**实际跑出来的结果**，并区分三件事：在本机验证过的、只在桩环境验证过的、以及尚未验证的。
+This file records only what was actually run, and separates three things: what is
+verified on this machine, what is verified against stubs only, and what is not
+verified at all.
+
+采集时间 / Captured: 2026-11-06, a Windows 11 24H2 desktop on residential egress
+behind a local proxy chain, Python 3.11, `yt-dlp 2026.07.04`.
+
+原始脚本与输出 / Raw scripts and outputs: three probe scripts
+(`probe_subtitle_channels.py`, `probe2_innertube_bili.py`, `probe3_bili_tracks.py`).
+They are deliberately not shipped: they hard-code this machine's paths, and the
+responses they captured are quoted in full below, which is the part that matters.
+
+---
+
+## 1. Bilibili：匿名会话能看到什么 / what an anonymous session sees
+
+`GET /x/web-interface/view?bvid=…` — **anonymous, no cookie**:
+
+```
+HTTP 200, code 0, message OK
+title=… duration=4879 cid=41494382554 pages=1
+```
+
+So metadata is free and unauthenticated. Verified for 6 videos.
+
+`GET /x/player/v2?bvid=…&cid=…` — anonymous, after a real homepage handshake that
+populated `buvid3` and `b_nut`:
+
+```
+http=200 code=0 n_subtitles=0 lan=[]
+data_keys=[… 'subtitle' present but empty …]
+```
+
+Sampled 6 valid videos (durations 202 s – 4879 s), **zero returned any subtitle
+track**:
+
+| bvid | duration | tracks |
+| --- | --- | --- |
+| BV1rjKn6CETw | 4879 | 0 |
+| BV1GJ411x7h7 | 213 | 0 |
+| BV1xx411c7mD | 2055 | 0 |
+| BV1fCxp6aEpH | 1425 | 0 |
+| BV1jfxB6qEzD | 202 | 0 |
+| BV1y7411Q7Lu | 202 | 0 |
+
+(2 further ids returned `code -404 啥都木有`, i.e. the videos are gone.)
+
+**结论 / Conclusion.** An anonymous session sees no subtitle tracks at all. This
+is *not* evidence that the videos lack captions — it is evidence about this
+session. **No positive control was obtained**: we could not find a single video
+whose captions are reachable anonymously, so this document does not claim
+"UP-authored subtitles work without login". The design therefore treats
+"0 tracks" as `needs_auth` and points at the logged-in browser, which is the
+remedy that works under either explanation.
+
+`GET /x/player/wbi/v2` (the signed variant) behaves identically: `code 0`, empty list.
+
+## 2. YouTube：机器人门禁 / the bot gate
+
+| 尝试 / attempt | 结果 / result |
+| --- | --- |
+| `GET /watch?v=…` (page HTML scrape) | **HTTP 429** |
+| `yt-dlp --list-subs --skip-download` | `ERROR: [youtube] …: Sign in to confirm you're not a bot` |
+| InnerTube `youtubei/v1/player` with the publicly documented static key, `WEB` | SSL handshake killed mid-stream |
+| same, `ANDROID` / `IOS` | **HTTP 400 `Precondition check failed`** |
+| same, `TVHTML5` | **HTTP 404 `Requested entity was not found`** |
+| same, `WEB_EMBEDDED_PLAYER` | HTTP 200 but `playabilityStatus=ERROR / "This video is unavailable"` |
+| `youtubei/v1/get_transcript` | **HTTP 400 `Precondition check failed`** |
+| `GET /oembed?url=…&format=json` | reachable, returns title + author only |
+
+**结论 / Conclusion.** There is no anonymous caption path for YouTube from this
+kind of egress, and the widely copy-pasted static-key InnerTube trick is dead.
+`sources/youtube.py` therefore does not hand-roll InnerTube; it delegates to
+yt-dlp and converts the bot-gate into `needs_browser` with the relay instructions.
+
+A later live run (section 5) additionally hit `_ssl.c:989 The handshake operation
+timed out` for every YouTube request. That is this machine's proxy chain, not new
+information about YouTube; the point stands that the CLI surfaced it as a typed
+failure with a remedy instead of hanging.
+
+## 3. 从本机 Chrome 取 Cookie / cookie extraction on this box
+
+```
+python -m yt_dlp --cookies-from-browser chrome --list-subs …
+ERROR: Failed to decrypt with DPAPI. See https://github.com/yt-dlp/yt-dlp/issues/10927
+```
+
+Identical for `edge`. **结论 / Conclusion.** `--cookies-from-browser` is broken on
+modern Chrome (app-bound encryption), so the desktop app's own cookie setting
+`cookie_browser` cannot work here either. The hosted service therefore accepts
+only `PVC_COOKIE_FILE` (Netscape format, exported by a browser extension) and
+`PVC_BILIBILI_SESSDATA`, and the primary channel is the browser relay.
+
+## 4. 离线自检与测试 / offline self-test and the suite
+
+```
+$ pvc check
+{"ok": true, … "network_used": false, "model_calls": 0,
+ "checks": [relay_accepts_good_payload, relay_rejects_sparse_payload,
+            parse_srt, parse_vtt_speaker, parse_json3_skips_newline_events,
+            chunk_plan, sparse_guard_present]}
+```
+
+`relay_rejects_sparse_payload` is a **negative control**: a 1-line payload
+claimed as a 2-hour video's captions is refused rather than summarised.
+
+```
+$ python -m pytest -q
+108 passed
+$ ruff check src service tests
+All checks passed!
+```
+
+What the suite actually exercises, and how far:
+
+| 层 / layer | 方式 / how | 距离真实 / realism |
+| --- | --- | --- |
+| URL 归一化 | 27 个真实分享文案形态 | 纯本地，输入即真实文本 |
+| 字幕解析 (json3/srt/vtt/srv3/bilibili/lrc) | 构造的真实格式文本，含滚动字幕重复、`<v>` 说话人标签、`"\n"` 事件 | 格式真实，站点响应是构造的 |
+| 回传门禁 | 稀疏/无时间/空内容三类拒绝 + 放行路径 | 逻辑真实，来源是构造 payload |
+| 分层总结 | 桩模型 + "总是把输入写大"的对抗桩模型（证明收敛） | 模型是桩，循环与预算是真的 |
+| LLM 传输 | **本机起真实 HTTP 服务**（OpenAI 兼容桩），走真 socket：端点拼接、usage 解析、429/503 退避重试、reasoning 模型回退字段、Ollama `think` 400 回退 | 传输是真的；模型不是真的 |
+| HTTP 服务 | `TestClient` + 一个真 uvicorn 端口给 CLI 远程路径 | 协议与鉴权是真的 |
+| 原缺陷回归 | `services.py:871` 的 `5xx_placeholder` NameError → 现在必须给出内存不足的建议 | 是 |
+
+**未覆盖 / Not covered here (named, not hidden):**
+
+1. **No call to a real LLM or ASR provider was made.** Both cost money and the
+   user's keys were not supplied for this session. The wire format is verified
+   against a stub server; quality of a real model's summary is not re-verified.
+2. **`skills/video-summary/assets/browser-extract.js` has not been run inside a
+   real logged-in browser.** It passes `node --check` and executes correctly
+   against 7 stubbed page scenarios (creator track, ASR track with `tlang`,
+   protocol-relative `subtitle_url`, empty anonymous list, `timedtext` 429,
+   unsupported host, members-only). The in-app browser available to this session
+   refuses navigation ("Browser operation timed out after 250ms"), so the live
+   page-context test is **not signed off** and must be run once by the user in a
+   browser that is logged into Bilibili.
+3. **No deployment has been created yet** — see section 6.
+
+## 5. 真实 CLI 输出（活网络）/ live CLI behaviour against the real network
+
+```
+$ pvc fetch "https://www.bilibili.com/video/BV1xx411c7mD/"
+{
+  "ok": false,
+  "code": "needs_browser",
+  "message": "没有可用通道取得该视频的逐字稿。bilibili_subtitles: B 站未向当前匿名会话下发任何字幕轨道；AI 字幕需要已登录 Cookie。（字幕君交流场所，时长 34:15） || audio_asr: 未设置 PVC_ASR_PROVIDER：没有字幕的视频将无法转写。",
+  "data": { "hint": "1) 在已登录的浏览器里… 2) 配置 PVC_BILIBILI_SESSDATA… 3) 配置音频转写通道…" }
+}
+exit=1
+
+$ pvc resolve "【硬核】大学物理 https://www.bilibili.com/video/BV1rjKn6CETw/?spm_id_from=333.788 值得一看"
+{"ok": true, "data": {"url": "https://www.bilibili.com/video/BV1rjKn6CETw/", "platform": "bilibili", "video_id": "BV1rjKn6CETw", "identity": "bilibili:BV1rjKn6CETw"}}
+
+$ pvc fetch "https://youtu.be/jNQXAC9IVRw"
+（oembed 与 yt-dlp 各重试 3 次后）
+{"ok": false, "code": "needs_browser", … "youtube_captions: YouTube 提取失败：…"}
+```
+
+These are the intended shapes: **the failure is the verified behaviour**, because
+on an unauthenticated session no transcript exists to obtain, and inventing one
+is the failure mode this design is built to prevent. The success path for a
+logged-in session is section 4's relay test plus the still-unsigned-off item 2.
+
+## 6. 尚未验证 / still to verify after deployment
+
+- A real Railway (or other) deploy answering `/healthz` over the public internet.
+- Muse actually reading this repo and deploying it from a GitHub URL.
+- Muse's browser actually running `browser-extract.js` on a logged-in page.
+- A real model call producing a summary the user considers good (the prompts are
+  ported byte-for-byte from the desktop app, and the desktop app's own stored
+  `profile_prompts` in `~/.pickvedio/settings.json` were confirmed **identical**
+  to the ported built-ins, which is the closest available proxy for "same output
+  as before").

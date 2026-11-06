@@ -1,0 +1,137 @@
+# Render blueprint for pickvedio-core  (dashboard: New -> Blueprint -> this repo)
+#
+# WHY THIS FILE EXISTS ALONGSIDE railway.json
+#   Railway is the primary target because the intended deployer (Meta's Muse
+#   personal agent) has a Railway connector and can do the whole deploy from
+#   chat. Render is the second option: it builds the SAME Dockerfile, has a
+#   real free web-service tier, and is worth keeping when you want a persistent
+#   service outside Railway's credit system. It is also the only host here with
+#   an environment disk, which is what makes async job state survive restarts.
+#
+# FREE-TIER HONESTY (read before deploying)
+#   * Render free web services sleep after ~15 minutes without traffic: the
+#     first request pays a 10-60 s cold start. Async jobs are mandatory anyway.
+#   * Free instances are roughly 512 MB RAM / 0.5 CPU, and the request is cut
+#     off around 100 s. Long videos therefore CANNOT be summarised in one HTTP
+#     call here either -- POST /v1/jobs + poll.
+#   * `disk` below is the thing that makes PVC_WORKDIR survive, but Render only
+#     gives persistent disks to PAID instance types (minimum 1 GB, and the
+#     number below is Render's minimum -- there is no "few hundred MB" option).
+#     On plan: free the disk section is ignored: job ids, transcripts and
+#     reports vanish on restart, so re-run a job instead of trusting an old id.
+#     To keep state on the free plan, either upgrade this service to a paid
+#     instance type, or point the CLI at the browser-relay path and re-push the
+#     transcript (it costs nothing to redo).
+#   * YouTube/Bilibili block anonymous datacenter IPs, so this container does
+#     NOT transcribe by default. The transcript arrives from a logged-in browser
+#     via POST /v1/transcripts; no ffmpeg, no yt-dlp, no ASR key needed.
+#     Set PVC_ASR_PROVIDER only if you deliberately want the paid/ASR path, and
+#     note the free image has no ffmpeg unless you build with INCLUDE_FFMPEG=1.
+#
+# SECRETS: anything marked sync:false + ${REDACTED} is written by you in the
+# dashboard (or by Muse setting service variables). ${REDACTED} is a placeholder
+# Render expands to an empty value on first create -- it is never a real secret,
+# and no secret is ever stored in this file or in git.
+
+services:
+  - type: web
+    name: pickvedio-core
+    env: docker
+    plan: free # free-tier-capable: relay path + LLM summarising only, sleeps when idle
+    region: singapore # nearest low-latency region for Bilibili/LLM endpoints; change freely
+    branch: main
+    repo: https://github.com/smartlotus/pickvedio-agent
+    dockerfilePath: ./Dockerfile
+    # No buildCommand: Render runs the Dockerfile as committed. To add the ASR
+    # path you must pass a build arg, which a blueprint cannot do -- use the
+    # dashboard "Build & Deploy -> Build Command" override or
+    # docker build --build-arg INCLUDE_FFMPEG=1 and push the image instead.
+    healthCheckPath: /healthz
+    autoDeploy: true
+    numInstances: 1
+    # Persistent job state. IGNORED ON PLAN `free` (paid instance types only).
+    # mountPath must match PVC_WORKDIR below.
+    disk:
+      name: pickvedio-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      # ---- platform plumbing ----
+      - key: PORT
+        value: "10000" # Render injects a PORT for Docker runtime; pinning it
+        # here keeps uvicorn and the health check in agreement
+      - key: PVC_WORKDIR
+        value: /data
+      - key: PVC_KEEP_MEDIA
+        value: "0" # never leave downloaded audio on an ephemeral filesystem
+
+      # ---- inbound auth (SECRET: service -> Environment -> Add) ----
+      - key: PVC_API_TOKEN # guards every /v1/* route (Authorization: Bearer)
+        value: ${REDACTED}
+        sync: false
+
+      # ---- summariser: the user's own LLM key ----
+      - key: PVC_LLM_PROVIDER # deepseek|openai|moonshot|zhipu|qwen|siliconflow|localai
+        value: deepseek
+      - key: PVC_LLM_BASE_URL # leave empty to use the provider preset
+        value: ""
+      - key: PVC_LLM_API_KEY # SECRET; localai/localhost needs no key
+        value: ${REDACTED}
+        sync: false
+      - key: PVC_LLM_MODEL # empty -> preset model (deepseek -> deepseek-chat)
+        value: ""
+      - key: PVC_LLM_TEMPERATURE
+        value: "0.2"
+      - key: PVC_LLM_MAX_TOKENS
+        value: "2600"
+
+      # ---- speech-to-text: OFF by default (paid + needs ffmpeg) ----
+      - key: PVC_ASR_PROVIDER # openai|groq|local_server|faster_whisper; empty = disabled
+        value: ""
+      - key: PVC_ASR_BASE_URL
+        value: ""
+      - key: PVC_ASR_API_KEY # SECRET; falls back to PVC_LLM_API_KEY when empty
+        value: ${REDACTED}
+        sync: false
+      - key: PVC_ASR_MODEL
+        value: ""
+      - key: PVC_ASR_MAX_MINUTES
+        value: "180"
+      - key: PVC_OLLAMA_URL # only for a self-hosted Ollama summariser
+        value: ""
+      - key: PVC_OLLAMA_MODEL # empty = Ollama channel disabled
+        value: ""
+
+      # ---- cost / length guards ----
+      - key: PVC_CHUNK_CHARS # chars per summariser chunk; 9000 is the runbook's cheap hosted value
+        value: "9000"
+      - key: PVC_MAX_CHUNKS
+        value: "40"
+      - key: PVC_MAX_MINUTES
+        value: "180"
+      - key: PVC_STYLE # general|interview|tutorial|brief
+        value: general
+      - key: PVC_PROMPT_DIR # empty -> built-in templates; set to /opt/render/project/src/prompts to use file overrides
+        value: ""
+      - key: PVC_ALLOW_UNKNOWN_PLATFORM
+        value: "0"
+      - key: PVC_FFMPEG # image default has no ffmpeg; only set with INCLUDE_FFMPEG=1 builds
+        value: ""
+      - key: PVC_CONFIG_FILE # optional JSON seed file for local use; unused on Render
+        value: ""
+      - key: PVC_WORKERS # in-process job pool size (service/app.py, default 2)
+        value: "2"
+      - key: PVC_AUTOCREATE # must stay 1: `uvicorn service.app:app` builds the app at import
+        value: "1"
+
+      # ---- video session (OPTIONAL, only for the direct-fetch path) ----
+      - key: PVC_BILIBILI_SESSDATA # SECRET: the user's own Bilibili cookie value;
+        # prefer the browser relay over shipping cookies to a public host
+        value: ${REDACTED}
+        sync: false
+      - key: PVC_COOKIE_FILE # path inside the container only; do not commit cookies
+        value: ""
+
+      # ---- client-side variables (NOT needed by the service) ----
+      # PVC_SERVICE_URL is read by the `pvc` CLI on the agent/phone side, never
+      # by this service; it is listed in deploy/env.example for completeness.

@@ -1,0 +1,80 @@
+# Docker build context for pickvedio-core.
+#
+# Only these paths are actually COPYed into the image:
+#   pyproject.toml  README.md  prompts/  src/  service/  deploy/healthcheck.py
+# Everything below is excluded so the context stays small and so local junk
+# (venvs, downloaded video, secrets) can never leak into an image layer.
+#
+# WARNING: `COPY` in the Dockerfile is explicit, so being listed here is not
+# the same as being required. If a future Dockerfile needs another path, delete
+# it from this file first. Two paths must stay in the context or the build
+# breaks / silently loses behaviour:
+#   README.md         -> pyproject.toml declares `readme = "README.md"`
+#   prompts/*.md      -> PVC_PROMPT_DIR overrides; the blanket `*.md` rule below
+#                        would otherwise drop them (hence the negation)
+
+# ---- git / CI / tooling ----
+.git
+.gitignore
+.gitattributes
+.railwayignore
+.github
+.editorconfig
+
+# ---- python noise ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- local runtime artifacts ----
+pickvedio-work/
+*.sqlite3
+*.db
+*.log
+.env
+.env.*
+
+# deploy/env.example is a documented template, not a secret: it stays in the
+# context (and in git).
+
+# ---- downloaded media / generated reports (ASR path leftovers) ----
+*.mp4
+*.mkv
+*.webm
+*.m4s
+*.m4a
+*.mp3
+*.wav
+*.flac
+*.ogg
+*.opus
+*.ts
+cookies.txt
+*.cookies.txt
+
+# ---- not needed inside the container image ----
+docs/
+skills/
+tests/
+*.md
+!README.md
+!prompts/*.md
+
+# ---- editors / OS ----
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db

@@ -1,0 +1,49 @@
+# Dependabot for pickvedio-core.
+#
+# Scope note: pyproject.toml owns the dependency *bounds*; Dependabot only opens
+# PRs to nudge within them (and to refresh action pins). Review a version bump
+# like a code change -- CI runs `pip install -e '.[dev]'`, pytest and the Docker
+# build for every one of these PRs, which is exactly what catches an yt-dlp
+# release that breaks Bilibili extraction.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      time: "03:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - python
+    commit-message:
+      prefix: deps
+      include: scope
+    # `media`, `service`, `local-asr`, `all` and `dev` are all read from
+    # pyproject.toml, so extras do not need separate entries.
+    groups:
+      python-minor:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      time: "03:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns:
+          - "*"

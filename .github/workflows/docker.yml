@@ -1,0 +1,104 @@
+name: Docker image
+
+# Builds and publishes the container image to the public GitHub Container
+# Registry. This is the ONLY workflow that pushes an image; the pull/PR gate
+# that proves the image builds lives in ci.yml (docker job, build only).
+#
+# Why publish at all: Railway/Render/Fly can build straight from the repo, but a
+# registry image is what lets a host that cannot pass build args
+# (INCLUDE_FFMPEG=1) still get the ASR variant, and it gives Muse a stable image
+# reference to redeploy without re-cloning.
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  # NOTE: `packages: write` is the only elevated permission in this file, and it
+  # is only used by docker/login-action against ghcr.io. GitHub's own attestation
+  # store (actions/attest-build-provenance) would additionally need
+  # `id-token: write` + `attestations: write`; we ship OCI attestations from
+  # buildx instead (provenance/sbom below), which needs neither.
+
+env:
+  IMAGE: ghcr.io/smartlotus/pickvedio-core
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    name: Build and publish ${{ matrix.variant }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two variants, one tag scheme. `relay` (default) is the small image the
+        # free tiers should run: no ffmpeg, browser-relay transcripts only.
+        # `asr` carries ffmpeg for the optional paid/local transcription path and
+        # is roughly 400 MB larger.
+        include:
+          - variant: relay
+            include_ffmpeg: "0"
+            tag_suffix: ""
+          - variant: asr
+            include_ffmpeg: "1"
+            tag_suffix: "-ffmpeg"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        # GITHUB_TOKEN can push to the current repo's ghcr.io namespace as long
+        # as the package is set to "this repository" visibility, then made
+        # public. First push may need the package created manually:
+        # ghcr.io/smartlotus/pickvedio-core -> Settings -> Public.
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags and labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=branch,suffix=${{ matrix.tag_suffix }}
+            type=ref,event=tag,suffix=${{ matrix.tag_suffix }}
+            type=semver,pattern={{version}},suffix=${{ matrix.tag_suffix }}
+            type=semver,pattern={{major}}.{{minor}},suffix=${{ matrix.tag_suffix }}
+            type=sha,format=short,suffix=${{ matrix.tag_suffix }}
+            type=raw,value=latest,enable={{is_default_branch}},suffix=${{ matrix.tag_suffix }}
+
+      - name: Build and push with provenance + SBOM attestations
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          provenance: mode=max
+          sbom: true
+          build-args: |
+            INCLUDE_FFMPEG=${{ matrix.include_ffmpeg }}
+            PYTHON_VERSION=3.12
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+
+      - name: Show what was published
+        # Inspect attestations with:
+        #   docker buildx imagetools inspect $IMAGE:latest --format '{{ json .Provenance }}'
+        #   docker buildx imagetools inspect $IMAGE:latest --sbom
+        run: docker buildx imagetools inspect "${IMAGE}:latest"

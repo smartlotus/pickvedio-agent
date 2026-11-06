@@ -1,0 +1,73 @@
+version: 1
+connector: video_summary
+display_name: Video Summary (pickvedio)
+description: Resolve video links, read transcripts from the browser or a deployed service, and produce layered Chinese summaries.
+request_quota:
+  mode: enforce
+  workers:
+    - video_summary
+  queries_per_minute: 20
+  burst: 5
+actions:
+  read:
+    default: allow
+    label: Read video metadata, transcripts, and job state
+    methods:
+      service.status:
+        label: Check configured channels, environment, and service reachability
+        approval_phrase: check the pickvedio service status
+      video.resolve:
+        label: Resolve a video link into platform, id, title, and duration
+        approval_phrase: resolve video links the user sends
+      transcript.read:
+        label: Read subtitles or captions that the user's session can already access
+        approval_phrase: read available subtitles and captions
+      job.read:
+        label: Read summarisation job status, progress, and finished reports
+        approval_phrase: read summarisation job results
+  write:
+    default: ask
+    label: Create jobs, relay transcripts, and change the deployment
+    methods:
+      transcript.push:
+        label: Upload a transcript extracted in the browser to the user's service
+        approval_phrase: send extracted transcripts to the deployed service
+      job.create:
+        label: Start a summarisation job that spends the user's LLM budget
+        approval_phrase: start summarisation jobs on the deployed service
+      summary.generate:
+        label: Transcribe audio with a paid ASR provider and summarise the result
+        approval_phrase: pay for speech-to-text and summarise the result
+      job.cancel:
+        label: Cancel a running summarisation job
+        approval_phrase: cancel a running job
+      service.deploy:
+        label: Deploy or redeploy the repository through the Railway connector
+        approval_phrase: deploy or redeploy the pickvedio service
+      service.configure:
+        label: Change service variables such as provider, model, chunk size, and limits
+        approval_phrase: change the pickvedio service configuration
+cli_subcommands:
+  - status
+  - resolve
+  - fetch
+  - summarize
+  - push
+  - job
+  - models
+  - profiles
+  - check
+consent_screen:
+  bullets:
+    - icon: data_types
+      title: "What it reads"
+      text: "Video links the user sends, plus the subtitle or caption tracks those pages already serve to the user's own logged-in browser session. Nothing is read from DRM-protected or paid content."
+    - icon: info
+      title: "Where it goes"
+      text: "The URL and the extracted transcript are sent to the pickvedio service the user configured, and the summary is requested from the language model they configured. Media files are not stored by the service."
+    - icon: caution
+      title: "Costs and mistakes"
+      text: "Summarising spends the user's API budget, and automatic captions or speech-to-text contain recognition errors that carry into the summary. Muse will ask before spending money."
+  footer_paragraphs:
+    - "The info used for your tasks is part of your interactions with Muse, which we may use to improve AI at Meta. You can manage this in Settings. [Learn more](https://www.facebook.com/privacy/genai/)"
+    - "Muse will exchange video links and transcript text with the user's own deployed pickvedio service and with their configured model providers. That service stores transcripts and reports under its PVC_WORKDIR and does not store downloaded media; the user can delete its job directory at any time. Review the platform's own terms before processing content you do not own."

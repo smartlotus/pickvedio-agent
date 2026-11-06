@@ -1,0 +1,180 @@
+name: Release
+
+# Triggered by a version tag (`git tag v1.0.0 && git push --tag`):
+#   1. builds an sdist + wheel,
+#   2. attaches them to a GitHub Release, together with a zip of the Muse skill
+#      pack so a non-Python user can install the skill without touching pip,
+#   3. publishes the distribution to PyPI through trusted publishing (no token).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)publish, e.g. v1.0.0
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build sdist, wheel and skill pack
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the tag
+        uses: actions/checkout@v4
+        with:
+          # workflow_dispatch on an older tag needs the tag itself, not just the
+          # default branch.
+          fetch-depth: 0
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build frontend
+        run: python -m pip install --upgrade pip build
+
+      - name: Build distribution (sdist + wheel)
+        # `python -m build` writes dist/*.tar.gz and dist/*.whl from the
+        # setuptools backend declared in pyproject.toml.
+        run: python -m build --outdir dist
+
+      - name: Verify the artifacts
+        run: |
+          python -m pip install --force-reinstall dist/*.whl
+          pvc --help > /dev/null
+          pvc check
+          python -m pip install --force-reinstall dist/*.tar.gz
+          pvc --help > /dev/null
+          echo "artifact contents:"
+          tar -tzf dist/*.tar.gz | sed -n '1,40p'
+
+      - name: Package the Muse skill pack as a zip asset
+        # A non-Python user cannot `pip install` a skill; they unzip it into
+        # /opt/hatch/skills/. The zip keeps the directory as its top level, so
+        # `unzip video-summary-skill-<tag>.zip` yields video-summary/SKILL.md.
+        run: |
+          test -f skills/video-summary/SKILL.md
+          test -f skills/video-summary/manifest.yaml
+          python -m pip install --quiet pyyaml
+          python - <<'PY'
+          import os
+          import pathlib
+          import zipfile
+          import yaml
+
+          skill = pathlib.Path("skills/video-summary")
+          version = os.environ.get("GITHUB_REF_NAME", "dev").lstrip("v") or "dev"
+          out = pathlib.Path("dist") / f"video-summary-skill-{version}.zip"
+          out.parent.mkdir(parents=True, exist_ok=True)
+
+          # Fail loudly rather than shipping a broken skill.
+          for name in ("SKILL.md", "manifest.yaml"):
+              data = yaml.safe_load((skill / name).read_text(encoding="utf-8").split("---\n")[1]
+                                    if name == "SKILL.md"
+                                    else (skill / name).read_text(encoding="utf-8"))
+              assert isinstance(data, dict), f"{name} is not a mapping"
+
+          skipped = ("__pycache__", ".pytest_cache", ".DS_Store")
+          with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+              for path in sorted(skill.rglob("*")):
+                  if not path.is_file() or any(part in skipped for part in path.parts):
+                      continue
+                  # relative to skills/ so the zip always has exactly one top
+                  # level directory: video-summary/SKILL.md, .../assets/..., no
+                  # matter what cwd or absolute root this runs from.
+                  zf.write(path, path.relative_to(skill.parent).as_posix())
+          print("wrote", out)
+          PY
+          unzip -l "dist/video-summary-skill-${GITHUB_REF_NAME#v}.zip"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ github.ref_name }}
+          path: dist/
+          if-no-files-found: error
+
+  github-release:
+    name: Publish the GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      # Needed only to create the release and upload its assets. The default
+      # `contents: read` from the workflow level is restored for every other job.
+      contents: write
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.ref_name }}
+          path: dist
+
+      - name: Create the release and attach every artifact
+        # `gh` is preinstalled on the runner; GITHUB_TOKEN supplies auth. No
+        # third-party release action, so the permission surface stays exactly
+        # `contents: write`.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if ! gh release view "$TAG" > /dev/null 2>&1; then
+            gh release create "$TAG" \
+              --target "${GITHUB_SHA}" \
+              --title "pickvedio-core $TAG" \
+              --generate-notes
+          fi
+          # Release assets: the Python distribution AND the skill zip.
+          gh release upload "$TAG" dist/* --clobber
+
+  pypi:
+    name: Publish to PyPI (trusted publishing)
+    needs: build
+    runs-on: ubuntu-latest
+    # MAINTAINER ACTION REQUIRED BEFORE THIS JOB CAN PASS:
+    #   PyPI -> your project "pickvedio-core" -> Publishing -> Trusted publishing:
+    #     Repository name: pickvedio-agent     (owner: smartlotus)
+    #     Workflow name:     release.yml       (this file)
+    #     Environment:       pypi              (must match `environment` below)
+    #     Distribution:      wheel AND sdist   (add both, or only one kind uploads)
+    #   Also create the matching GitHub environment named `pypi` in
+    #   Settings -> Environments, and leave its deployment protection rules empty
+    #   unless you want manual approval before every publish.
+    #   There is deliberately NO API token in repository secrets: a leaked
+    #   secret is permanent, a short-lived OIDC id-token is not. Until the
+    #   trusted publisher exists, this job fails with PyPI's
+    #   "the credential associated with user ... is not trusted" / 401 response.
+    #   That failure is the expected state, not a bug in this file.
+    #   Note the `if:` below: a manual workflow_dispatch run builds and can
+    #   publish a GitHub Release, but it does NOT push to PyPI, because a
+    #   dispatch ref is a branch, not a v* tag.
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # OIDC id token for PyPI trusted publishing; nothing else
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download dist
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ github.ref_name }}
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Default upload directory; skip already-existing files so a
+          # re-run of a failed release cannot half-publish a version.
+          skip-existing: true
+          verbose: true
