@@ -109,10 +109,41 @@ claimed as a 2-hour video's captions is refused rather than summarised.
 
 ```
 $ python -m pytest -q
-108 passed
+112 passed
 $ ruff check src service tests
 All checks passed!
 ```
+
+Hermeticity, checked rather than assumed:
+
+```
+$ HTTP_PROXY=http://127.0.0.1:1 HTTPS_PROXY=http://127.0.0.1:1 ALL_PROXY=... \
+  NO_PROXY=127.0.0.1,localhost python -m pytest -q
+112 passed        # with all external egress pointed at a dead port
+```
+
+So no test depends on Bilibili, YouTube, or a model provider. (This was added
+after CI exposed a test that *did* reach Bilibili and failed there with `-412`
+while passing locally.)
+
+### Defects CI found that local runs could not
+
+Both were real, and both were invisible on the author's machine:
+
+| 缺陷 / defect | 为什么本机看不出来 / why local passed |
+| --- | --- |
+| `service/` 在仓库根目录，不属于安装的包 → 安装后 `import service.app` 失败，`uvicorn service.app:app` 与 `pvc serve` 在真实主机上会崩 | 本机 pytest 与 `pvc serve` 的 cwd 就是仓库根，旁边正好有个 `service/` 目录;而 CI 里那句 `python -c "import service.app"` 同样在仓库根运行,所以它绿着发布了一个假的部署承诺 |
+| `pvc push --transcript '<内联 JSON>'` 在 Linux 上抛 `OSError(ENAMETOOLONG)` | 代码用 `Path(整段文本).is_file()` 判断"这是不是文件路径";Windows 对超长路径返回 False,Linux 的 `stat()` 直接抛错。长度也刚好只在 CI 的 fixture 规模上越界 |
+
+修复与门禁 / fixes and gates:
+
+- `service/` 移到 `src/service/`，并新增一条用空目录作 cwd 的回归测试
+  (`test_service_is_importable_outside_the_checkout`)；CI 的导入断言也改成在 `mktemp -d` 里跑。
+- 字符串是否为文件名改为显式判断 (`_looks_like_path`)，新增
+  `test_inline_relay_json_larger_than_a_pathname_is_parsed_not_stat` 与
+  `test_cli_push_accepts_a_large_inline_transcript` 两条正对照。
+- 原先"轮询看到过 summarizing"的断言依赖桩模型速度，属于会随机变的测试；改为用 spy store
+  确定性断言阶段序列 (`test_pipeline_reports_stage_transitions_in_order`)。
 
 What the suite actually exercises, and how far:
 

@@ -60,6 +60,21 @@ def _source_kind(value: str | None) -> SourceKind:
     return SourceKind.RELAYED
 
 
+def _looks_like_path(spec: str) -> bool:
+    """Decide whether a string is meant to be a filename, without touching the OS.
+
+    ``Path(huge).is_file()`` is not a safe probe: on Linux an over-long path
+    raises ``OSError(ENAMETOOLONG)`` out of ``stat()`` rather than returning
+    False, so a relayed transcript pasted inline -- the normal way an agent
+    calls this -- crashed the CLI. Only short, newline-free strings that are not
+    JSON can be filenames here.
+    """
+    if len(spec) > 512 or "\n" in spec:
+        return False
+    stripped = spec.strip()
+    return bool(stripped) and stripped[0] not in '[{"'
+
+
 def segments_from_payload(
     payload: Any, *, name: str = "", fmt: str = "", duration: float | None = None
 ) -> list[Segment]:
@@ -95,9 +110,11 @@ def segments_from_payload(
     if isinstance(payload, (bytes, bytearray)):
         payload = payload.decode("utf-8", errors="replace")
     if isinstance(payload, str):
-        if payload and not Path(payload).is_file():
+        if not _looks_like_path(payload):
             stripped = payload.strip()
             if stripped.startswith("{"):
+                # A whole browser-extraction object pasted inline: still a
+                # document, not a caption body.
                 try:
                     decoded = json.loads(stripped)
                 except ValueError:
@@ -105,8 +122,11 @@ def segments_from_payload(
                 if isinstance(decoded, dict):
                     return segments_from_payload(decoded, name=name, fmt=fmt, duration=duration)
             return parse(payload, name=name, fmt=fmt, duration=duration)
-        return parse(Path(payload).read_text(encoding="utf-8", errors="replace"),
-                     name=name or Path(payload).name, fmt=fmt, duration=duration)
+        path = Path(payload)
+        if not path.is_file():
+            raise PickvedioError(f"找不到字幕文件：{payload[:120]}")
+        return parse(path.read_text(encoding="utf-8", errors="replace"),
+                     name=name or path.name, fmt=fmt, duration=duration)
     raise PickvedioError(f"无法解析回传内容：{type(payload).__name__}")
 
 

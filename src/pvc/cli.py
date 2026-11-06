@@ -130,16 +130,21 @@ def _target(args, positional: str = "url_arg") -> str:
 
 
 def _read_payload(spec: str) -> Any:
-    """Accept a path, ``-`` for stdin, or an inline JSON string."""
+    """Accept a path, ``-`` for stdin, or an inline JSON string.
+
+    The filesystem is only consulted for short, newline-free, non-JSON text:
+    on Linux ``Path(huge).is_file()`` raises ``ENAMETOOLONG`` instead of
+    returning False, and agents paste whole extraction objects inline.
+    """
     if spec == "-":
         return sys.stdin.read()
-    path = Path(spec)
+    stripped = spec.strip()
+    if not stripped or stripped[0] in '[{"' or len(stripped) > 512 or "\n" in stripped:
+        return stripped
+    path = Path(stripped)
     if path.is_file():
         return path.read_text(encoding="utf-8", errors="replace")
-    stripped = spec.strip()
-    if stripped.startswith(("{", "[", '"')):
-        return stripped
-    raise PickvedioError(f"既不是文件也不是 JSON：{spec[:80]}")
+    raise PickvedioError(f"找不到该文件，也不像 JSON 内容：{stripped[:120]}")
 
 
 # -- commands ----------------------------------------------------------------

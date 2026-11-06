@@ -158,7 +158,11 @@ def test_job_lifecycle_create_poll_report(client):
             break
         time.sleep(0.2)
     assert status["status"] == "completed", status
-    assert "summarizing" in seen_stages or "transcribing" in seen_stages
+    assert seen_stages, "状态查询没有见到任何阶段"
+    # Which intermediate stages a poller happens to observe depends on how fast
+    # the stub answers, so that is not asserted here. The stage sequence itself
+    # is asserted deterministically in
+    # test_pipeline_reports_stage_transitions_in_order.
 
     report = client.get(f"/v1/jobs/{job_id}/report", headers=headers).json()
     assert report["summary"].strip() and report["title"] == "浏览器回传的视频"
@@ -206,13 +210,20 @@ def test_cancel_reports_not_running_for_a_finished_job(client):
 
 
 def test_metadata_endpoint_describes_an_unavailable_caption_session(client, monkeypatch):
-    """Bilibili answers 200 with an empty track list anonymously.
+    """The API must say "this session cannot see tracks", not "there are none".
 
-    The API must say so rather than implying the video has no captions, because
-    that distinction is what tells the agent to use the browser channel.
+    Fully hermetic: on a CI runner the real Bilibili view API answers
+    ``-412 需要真实浏览器会话``, which would test the network instead of the
+    endpoint's reporting.
     """
     from pickvedio_core.sources import bilibili as bili
+    from pickvedio_core.sources.bilibili import BilibiliVideo
 
+    fake = BilibiliVideo(
+        bvid="BV1xx411c7mD", aid=1, cid=2, title="元数据测试", duration=120.0, pages=[],
+        uploader="up", description="", webpage_url=RELAY_URL,
+    )
+    monkeypatch.setattr(bili.BilibiliClient, "video", lambda self, url, page=1: fake)
     monkeypatch.setattr(bili.BilibiliClient, "subtitle_tracks", lambda self, video: [])
     response = client.get(
         "/v1/metadata", params={"url": RELAY_URL},
@@ -220,6 +231,7 @@ def test_metadata_endpoint_describes_an_unavailable_caption_session(client, monk
     )
     assert response.status_code == 200, response.text
     body = response.json()
+    assert body["title"] == "元数据测试"
     assert body["subtitle_tracks"] == []
     assert "浏览器" in body["hint"]
 
@@ -414,6 +426,69 @@ def test_service_is_importable_outside_the_checkout(tmp_path):
     )
     assert probe.returncode == 0, probe.stderr[-500:]
     assert "service.app" in probe.stdout
+
+
+
+def test_inline_relay_json_larger_than_a_pathname_is_parsed_not_stat():
+    """Regression: an agent pastes the whole extraction object inline.
+
+    ``Path(huge).is_file()`` raises OSError(ENAMETOOLONG) on Linux instead of
+    returning False, which crashed ``pvc push --transcript '<json>'`` there
+    while passing on Windows. A transcript body must never be probed as a
+    filename.
+    """
+    from pickvedio_core.sources.relay import segments_from_payload
+
+    payload = json.dumps(relay_body(count=220, length=200))
+    assert len(payload) > 20000
+    rows = segments_from_payload(payload)
+    assert len(rows) == 220
+    assert rows[0].text.startswith("内容文字")
+
+
+def test_cli_push_accepts_a_large_inline_transcript(settings):
+    """The same path through the CLI, where the crash was actually reported."""
+    document = run_cli([
+        "push", "--url", RELAY_URL, "--transcript", json.dumps(relay_body(count=60, length=200)),
+        "--title", "内联回传", "--duration", "480", "--source-kind", "up_subtitles",
+        "--style", "brief", "--out", str(settings.workdir / "inline"),
+    ])
+    assert document["ok"] is True, document
+    assert document["data"]["summary"].strip()
+
+
+def test_pipeline_reports_stage_transitions_in_order(settings, fixture_segments):
+    """Deterministic version of what the poller used to assert by luck.
+
+    A UI or agent that shows "到哪一步了" reads ``stage`` from the job row, so
+    the ordering is a contract, not an implementation detail.
+    """
+    from pickvedio_core.jobs import JobStore
+
+    store = JobStore(settings.workdir / "stages.sqlite3")
+    record = store.create(RELAY_URL, platform="bilibili", style="brief")
+    seen: list[str] = []
+    original_progress = store.progress
+
+    def spy(job_id, ratio, message, stage=None):
+        if stage:
+            seen.append(stage)
+        return original_progress(job_id, ratio, message, stage)
+
+    store.progress = spy
+    pipeline_run(
+        RELAY_URL, settings, style="brief", job_id=record.id, store=store,
+        relay_payload={"segments": [item.as_dict() for item in fixture_segments],
+                       "title": "阶段测试"},
+        relay_meta={"title": "阶段测试", "duration": 71.0, "source_kind": "up_subtitles",
+                    "strict": False},
+    )
+    # Distinct, in order. Each chunk's progress row re-enters `summarizing`, and
+    # the relay path never enters `transcribing` because there is no audio stage
+    # -- both of those are the contract an agent-facing progress line reads.
+    distinct = [stage for index, stage in enumerate(seen) if index == 0 or stage != seen[index - 1]]
+    assert distinct == ["resolving", "summarizing", "finalizing"], seen
+    assert store.get(record.id).stage == "completed"
 
 
 
