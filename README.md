@@ -62,8 +62,9 @@ python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickv
                                     # distribution found —— 必须带 git+ 地址
 python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.7/pickvedio_core-1.0.7-py3-none-any.whl"
                                     # 机器上没有 git 时的等价做法：直接装 Release 附件，
-                                    # 匿名可下载（这行在 1.0.4 上实测 pip 取到并装成功；
-                                    # 若这台机到 github.com 的 TLS 已经坏了，见下面那段）
+                                    # 匿名可下载。Release 作业每次发版都按当时的 tag 把
+                                    # 这条形状的命令真跑一遍（v1.0.7 已实测通过；1.0.4 时
+                                    # 是手工实测）。这台机若连 github.com 都超时，见下面那段
 
 pvc check                        # 离线自检，不联网、不调用模型
 pvc status                       # 当前部署能用哪些通道，缺哪些环境变量

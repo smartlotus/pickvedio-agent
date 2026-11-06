@@ -741,6 +741,39 @@ Muse 装的从来不是仓库源码，而是 release 里那个 `video-summary-sk
   取到它"**——正因如此这一版要发 v1.0.7：新门不当场跑一次，就等于把一条没跑过的
   步骤写进发布链。
 
+### 5r. v1.0.7 的发布件核验（新门当场跑通了）
+
+- Release 作业里新加的那一步**真的跑了并且通过**：作业日志第 18:05:19Z 打出
+  `proof target: https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.7/pickvedio_core-1.0.7-py3-none-any.whl`，
+  六秒后 `documented wheel URL installed and self-tested: ok`——也就是 runner 在
+  公网匿名条件下 curl HEAD + pip 装那个 URL + 干净 venv 里跑 `pvc check`（断言
+  `ok` 且 `data.network_used is false`）全绿。§5q 说"只剩这一件事没证"，到此证了；
+  取日志时又有两个小坑：`gh api .../actions/jobs/<id>/logs` 直接报
+  `the response contains terminal escape sequences`，得改 `gh run view --job <id> --log`，
+  而且 grep 前要用 `-a`（日志里有 ANSI 转义）。
+- 三个资产的字节都从 API 资产口取回并与 REST `digest` 逐字节对上：
+  wheel `4cd6e814…`（106026 B）、sdist `b2ec75e6…`（122779 B）、
+  skill zip `54541406…`（36373 B）。
+- 干净 venv 里装**发布件**（不是 checkout）再测一遍 §5n/§5o 的两条行为：
+  `version=1.0.7`、wheel 内 `RELAY_REASON_HINTS` 19 条、真实空回传对象走
+  `pvc push` 得到 `ok=false / empty_transcript / data.hint` 91 字含"登录"且不是
+  通用兜底那句、message 带 reason 与提取器警告；文本 payload 读出
+  title、duration=104.0、source=up_subtitles、6 段。
+- Muse 装的那个 zip 也拆开逐条看了：7 个条目、`SKILL.md` 里 `@v1.0.7` 与
+  `data.hint`（2 次）都在；`deploy-runbook.md` 里 §5o 补的路线 1 英文块在场，
+  关键要素齐（`bootstrap.sh`、`verdict: READY`、`browser-extract.js`、`relay.json`、
+  `data.hint`、`job wait`），`PVC_CHUNK_CHARS=9000` 出现 2 次且没有残留的 `=18000`；
+  `SKILL.md` 与 `browser-extract.js` 相对仓库在 LF 口径下逐字节相同。
+- README 那条 wheel 安装的注释也随之改写：不再写"已实测 pip 能取到并装上 <版本>"
+  这种每年都要重新兑现的一句话，而是写明"Release 作业每次发版按当时的 tag 真跑这条
+  形状的命令，v1.0.7 已实测通过；1.0.4 时是手工实测"，并保留这台机 github.com 超时
+  时那两条取同一字节的替代路。
+- 至此三条被文档化的安装路（git+ 标签、Release 附件 wheel、clone + `bash bootstrap.sh`）
+  都各自有 CI 作业每次真跑：前两条分别是 Install 与 Release 的发布证明，第三条是
+  Bootstrap 作业在 ubuntu:24.04 上先证伪镜像再自举。§6 那张表仍然挂着不在这台机
+  控制之内的几件事：Railway 真实部署回 `/healthz`、Muse 真把这个仓库当 skill 装起来、
+  已登录会话真下发字幕轨道、以及你本人对总结质量的判断。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
