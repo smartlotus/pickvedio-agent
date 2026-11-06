@@ -251,7 +251,10 @@ def test_openai_compatible_retries_then_succeeds(stub_llm):
 
 
 def test_openai_compatible_gives_up_with_the_last_error(stub_llm):
-    stub_llm.fail_then_succeed(99, 429)
+    # 503 rather than 429: a throttle now ends as RateLimited with the wait it
+    # named (tests/test_throttle_contract.py), and this test is about the ladder
+    # giving up on a server that is simply broken.
+    stub_llm.fail_then_succeed(99, 503)
     client = OpenAICompatibleClient(
         LLMSettings(base_url=stub_llm.base_url, api_key="k", model="stub-mini", request_timeout=5.0)
     )

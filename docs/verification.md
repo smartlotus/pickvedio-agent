@@ -774,6 +774,50 @@ Muse 装的从来不是仓库源码，而是 release 里那个 `video-summary-sk
   控制之内的几件事：Railway 真实部署回 `/healthz`、Muse 真把这个仓库当 skill 装起来、
   已登录会话真下发字幕轨道、以及你本人对总结质量的判断。
 
+### 5s. 限流这条路：文档承诺的字段在代码里根本不存在
+
+审 §5p 那个发布包时顺手读了 `eval/scenarios.yaml`（Muse 拿它自评），
+`rate_limited_stops` 的夹具是
+`'two consecutive {"ok":false,"code":"rate_limited","hint":"retry_after_seconds":120}'`
+—— 不是合法 JSON、把 hint 放在顶层、还点名一个字段。顺着这条往下查：
+
+- `grep -rn "retry_after" src/` 在改动前 **0 命中**：troubleshooting 表格和自评包一起
+  让 agent "honour `retry_after_seconds`"，而整个包里没有任何地方会给出这个数。
+- `llm.py` 的重试状态集合含 429，走的是 `last = UpstreamModelError(...)`，
+  循环跑完 `raise last`——所以**模型侧限流被贴成 `model_error`**；
+  同一文件里那个 `except HTTPStatusError` 的 429 分支实际不可达（429 先被上面截走）。
+  `asr.py` 和 `sources/net.py` 的对应分支却给 `RateLimited`。三条路对同一件事说两种话，
+  而 SKILL.md 的判定阶梯是按 `code` 分支的，于是长视频撞上限流时 agent 被指向"模型坏了"。
+- SKILL.md 第 10 条还写着"`rate_limited` 最多再重试两次"，而工具自己已经打了 4 次
+  （0/2/6/18 秒退避）。照文档做，一个任务最多打限流接口 8 次——正好是那条规则想避免的事。
+
+修（都有测试，先红后绿）：
+
+1. `llm.py` 把 429 从"泛泛可重试"里分出来：仍走同一条退避梯子，但最后报
+   `RateLimited`，并读 `Retry-After` ——**只在它是纯数字秒时**给出；
+   HTTP-date 不去猜成秒数（`test_a_non_numeric_retry_after_is_not_turned_into_a_number`）。
+   `asr.py` 同一处理；`net.py` 保持通用提示（它没那个头）。
+2. `RateLimited` 带 `retry_after_seconds`，hint 有两种：点名"等 N 秒"或通用退避；
+   CLI 与 service 只在真有值时才把键放进 `data`（不是给别种错误塞一个 null）。
+3. troubleshooting 那一行改写为实话（字段何时有、为何不猜、工具已自行退避过）；
+   SKILL.md 第 10 条改成"等一次、串行再试一次、再被拒就报进度并停下，不许并发铺开"。
+4. 自评包：三个 reason 控制项的 `browser_extract` 换成**真实抽取器对象**
+   （`relay_no_subtitles` 逐字节来自那次在线提取），各补一份能真正打印出来的
+   `push` 失败信封，`required_behaviour` 明确写"以 `data.hint` 为下一步指令"；
+   `page_text` 与 `rate_limited` 两处夹具改成合法 JSON 形状。
+
+新文件 [tests/test_throttle_contract.py](../tests/test_throttle_contract.py) 7 个测试，
+红的时候 6 个 FAILED，报错原文就是这次要修的两句：
+`UpstreamModelError: 总结服务返回 429：…` 和 `RateLimited() takes no keyword arguments`。
+其中"信封形状"那道题带三个 planted 反例（顶层 hint、非法 JSON、非整数等待），
+必须全部被拒才算绿；YAML 锚点漏声明（`*relay_members_only`）也是被它当场抓出来的。
+
+一处旧期望被推翻而不是被放宽：`test_openai_compatible_gives_up_with_the_last_error`
+原来用 429 当"服务一直失败"的例子，改成 503——断言强度不变，只是不再把限流当成普通故障。
+
+1.0.8 带这些改动，是因为它们改变的是 **agent 看到的 `code` 与 `data`**，
+而不只是文档措辞。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

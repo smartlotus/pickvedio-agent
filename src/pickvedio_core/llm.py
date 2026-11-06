@@ -136,17 +136,31 @@ class OpenAICompatibleClient:
                 ) as client:
                     response = client.post(self.endpoint, headers=self.headers(), json=payload)
                     if response.status_code in _RETRY_STATUS:
-                        last = UpstreamModelError(
-                            f"总结服务返回 {response.status_code}：{response.text[:220]}"
-                        )
+                        if response.status_code == 429:
+                            # A throttle is a different answer from a broken
+                            # model: the retry ladder is the same, but what the
+                            # agent is told afterwards is not. The docs branch
+                            # on `rate_limited` and honour `retry_after_seconds`,
+                            # which used to be reported as neither.
+                            claimed = (response.headers.get("Retry-After") or "").strip()
+                            last = RateLimited(
+                                f"总结服务限流（429）：{response.text[:220]}",
+                                retry_after_seconds=int(claimed) if claimed.isdigit() else None,
+                            )
+                        else:
+                            last = UpstreamModelError(
+                                f"总结服务返回 {response.status_code}：{response.text[:220]}"
+                            )
                         logger.warning("llm retry %s status=%s", attempt + 1, response.status_code)
                         continue
                     response.raise_for_status()
                     data = response.json()
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 429:
+                    claimed = (exc.response.headers.get("Retry-After") or "").strip()
                     raise RateLimited(
-                        f"总结服务限流（429）：{exc.response.text[:200]}"
+                        f"总结服务限流（429）：{exc.response.text[:200]}",
+                        retry_after_seconds=int(claimed) if claimed.isdigit() else None,
                     ) from exc
                 raise UpstreamModelError(
                     f"总结服务返回 {exc.response.status_code}：{exc.response.text[:300]}"

@@ -56,9 +56,31 @@ class UpstreamBlocked(PickvedioError):
 
 
 class RateLimited(PickvedioError):
+    """A provider or upstream endpoint said "slow down" and the retries ran out.
+
+    The docs and the skill's eval pack both branch on this code and honour
+    ``retry_after_seconds``, so the number has to be real: it is the integer
+    from a ``Retry-After`` header and nothing otherwise. A date-form header is
+    deliberately not converted -- guessing seconds would be worse than silence.
+    """
+
     code = "rate_limited"
     http_status = 429
     retryable = True
+    hint = (
+        "上游限流：不要并发发起别的任务，也不要紧密轮询同一个接口。"
+        "等一段时间后单独重试一次；仍然被限流就如实报告进度并停下，"
+        "字幕类请求可以改走已登录浏览器的回传通道。"
+    )
+
+    def __init__(self, message: str, *, retry_after_seconds: int | None = None) -> None:
+        super().__init__(message)
+        self.retry_after_seconds = retry_after_seconds
+        if retry_after_seconds:
+            self.hint = (
+                f"上游要求等 {retry_after_seconds} 秒再试：这段时间里不要并发发起别的任务，"
+                "也不要紧密轮询；等够之后再单独试一次，仍被限流就如实报告进度并停下。"
+            )
 
 
 class AuthRequired(PickvedioError):

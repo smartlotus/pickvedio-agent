@@ -772,7 +772,11 @@ def main(argv: list[str] | None = None) -> int:
     except PickvedioError as exc:
         hint = getattr(exc, "hint", "")
         return emit(envelope(
-            ok=False, code=getattr(exc, "code", "error"), message=str(exc)[:1200], hint=hint or None
+            ok=False, code=getattr(exc, "code", "error"), message=str(exc)[:1200],
+            hint=hint or None,
+            # Only a throttle sets this; `envelope` drops the None, so no other
+            # failure grows a key.
+            retry_after_seconds=getattr(exc, "retry_after_seconds", None),
         ))
     except KeyboardInterrupt:
         return emit(envelope(ok=False, code="cancelled", message="用户中断。"))

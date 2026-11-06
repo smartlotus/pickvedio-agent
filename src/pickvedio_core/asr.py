@@ -121,8 +121,10 @@ class ApiTranscriber:
                             headers["Authorization"] = f"Bearer {self.settings.api_key}"
                         response = client.post(self.endpoint, data=data, files=files, headers=headers)
                 if response.status_code in self.RETRY_STATUS:
+                    claimed = (response.headers.get("Retry-After") or "").strip()
                     last = RateLimited(
-                        f"转写服务返回 {response.status_code}：{response.text[:200]}"
+                        f"转写服务返回 {response.status_code}：{response.text[:200]}",
+                        retry_after_seconds=int(claimed) if claimed.isdigit() else None,
                     )
                     self.usage.errors.append(str(last)[:160])
                     continue

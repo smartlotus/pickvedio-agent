@@ -354,16 +354,20 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
 
     @app.exception_handler(PickvedioError)
     async def pickvedio_handler(request: Request, exc: PickvedioError) -> Any:
-        return JSONResponse(
-            status_code=status_for(exc),
-            content={
-                "ok": False,
-                "code": getattr(exc, "code", "error"),
-                "message": str(exc)[:1500],
-                "hint": getattr(exc, "hint", "") or None,
-                "retryable": bool(getattr(exc, "retryable", False)),
-            },
-        )
+        content = {
+            "ok": False,
+            "code": getattr(exc, "code", "error"),
+            "message": str(exc)[:1500],
+            "hint": getattr(exc, "hint", "") or None,
+            "retryable": bool(getattr(exc, "retryable", False)),
+        }
+        # A throttle additionally says how long the endpoint asked for, when it
+        # said so in whole seconds. Absent otherwise, rather than a null the
+        # caller has to distinguish from "zero".
+        wait = getattr(exc, "retry_after_seconds", None)
+        if wait:
+            content["retry_after_seconds"] = wait
+        return JSONResponse(status_code=status_for(exc), content=content)
 
     # No explicit shutdown hook: ThreadPoolExecutor registers its own atexit
     # join, and FastAPI's on_event is deprecated. A container SIGTERM therefore

@@ -28,7 +28,7 @@ PyPI, so a bare `pip install pickvedio-core` fails with "No matching distributio
 found" and that is an install-path mistake, not a bug in the tool:
 
 ```bash
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.7"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.8"
 ```
 
 Extras go inside the bracket before the `@`:
@@ -178,10 +178,14 @@ Credential storage:
    expected tier, the length, and ask once.
 9. Use the async job API for anything long. Never hold a single synchronous
    HTTP request open past a free-tier timeout: `job create` then `job wait`.
-10. On `rate_limited` or `network`, retry at most twice with backoff, then report
-    the partial state. These are the only retryable codes; `needs_browser`,
-    `needs_auth`, `configuration` and `dependency_missing` never become better by
-    repeating them.
+10. On `rate_limited` or `network`, remember that the tool has **already** run its
+    own backoff ladder before returning (a model call gets four attempts) — do not
+    multiply it. Wait once, honouring `data.retry_after_seconds` when the envelope
+    carries it and taking a long pause when it does not, then make one further
+    attempt in series. If that is refused too, report the partial state and stop.
+    Never fan jobs out in parallel to "get through". These are the only retryable
+    codes; `needs_browser`, `needs_auth`, `configuration` and `dependency_missing`
+    never become better by repeating them.
 11. Never fabricate. No invented timestamps, no quotes the transcript does not
     contain, no "the video probably continues with". Gaps are reported as gaps.
 12. Reply in the user's language, and write summaries in Chinese by default; the
