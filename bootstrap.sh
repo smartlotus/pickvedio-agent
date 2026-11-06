@@ -37,35 +37,64 @@ if [ "$WITH_SERVICE" = "1" ]; then
   EXTRAS="dev,service"
 fi
 
+# The question is not "is it on PATH" but "does it run". On Windows, python3 is
+# often the Microsoft Store execution alias: `command -v` finds it, executing it
+# prints nothing and fails, and this script then reported
+# "needs Python >= 3.10, found " with an empty version -- measured on a real
+# Windows box while testing it, which is exactly the obscure failure a setup
+# script is supposed to remove.
+PYTHON_FLOOR='import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'
 PYTHON_BIN="${PYTHON_BIN:-}"
-if [ -z "$PYTHON_BIN" ]; then
+tried=""
+if [ -n "$PYTHON_BIN" ]; then
+  # An explicit choice is respected, but still checked rather than trusted.
+  if ! "$PYTHON_BIN" -c "$PYTHON_FLOOR" 2>/dev/null; then
+    echo "verdict: FAILED -- PYTHON_BIN=$PYTHON_BIN is not a working Python >= 3.10 ($("$PYTHON_BIN" -V 2>&1 | head -c 60))" >&2
+    exit 1
+  fi
+else
   for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1; then
+    command -v "$candidate" >/dev/null 2>&1 || continue
+    if "$candidate" -c "$PYTHON_FLOOR" 2>/dev/null; then
       PYTHON_BIN="$candidate"
       break
     fi
+    # `|| true` is load-bearing: with `set -euo pipefail` still in force, the
+    # exit status of an assignment comes from its command substitution, and a
+    # Microsoft Store python3 alias exits 49 -- so collecting the reason for the
+    # error message aborted the script before any message existed.
+    candidate_version="$({ "$candidate" -V 2>&1 || true; } | head -c 40)"
+    tried="$tried $candidate(${candidate_version:-<no output, exit non-zero>})"
   done
 fi
 if [ -z "$PYTHON_BIN" ]; then
-  echo "verdict: FAILED -- no python3/python on PATH" >&2
-  exit 1
-fi
-
-# 3.10 is the floor the package declares; the enum/dataclass interaction that
-# broke on older toolchains is why, so say so instead of failing obscurely.
-if ! "$PYTHON_BIN" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
-  echo "verdict: FAILED -- needs Python >= 3.10, found $("$PYTHON_BIN" -V 2>&1)" >&2
+  # 3.10 is the floor the package declares; the enum/dataclass interaction that
+  # broke on older toolchains is why, so name it instead of failing obscurely.
+  echo "verdict: FAILED -- no working Python >= 3.10 on PATH.${tried:+ (skipped:$tried)}" >&2
+  echo "                Set PYTHON_BIN=/path/to/python and re-run bash bootstrap.sh" >&2
   exit 1
 fi
 
 echo "==> interpreter: $("$PYTHON_BIN" -V 2>&1) at $(command -v "$PYTHON_BIN")"
 echo "==> environment: $VENV"
-VENV_PY="$VENV/bin/python"
-[ -x "$VENV_PY" ] || VENV_PY="$VENV/Scripts/python.exe"
+find_venv_python() {
+  if [ -x "$VENV/bin/python" ]; then
+    VENV_PY="$VENV/bin/python"
+  elif [ -x "$VENV/Scripts/python.exe" ]; then
+    VENV_PY="$VENV/Scripts/python.exe"
+  else
+    VENV_PY=""
+  fi
+}
 
-if [ ! -x "$VENV_PY" ]; then
+find_venv_python
+if [ -z "$VENV_PY" ]; then
   if venv_error="$("$PYTHON_BIN" -m venv "$VENV" 2>&1)"; then
-    :
+    # Resolve again only after the environment exists. Deciding the interpreter
+    # path beforehand is what once broke every Linux run: neither layout existed
+    # yet, so the fallback branch picked Scripts/python.exe and the next command
+    # died with "No such file or directory".
+    find_venv_python
   else
     # Debian and Ubuntu ship python3 without ensurepip (it lives in the
     # python3-venv package), so the very first command an agent runs in a cloud
@@ -75,6 +104,12 @@ if [ ! -x "$VENV_PY" ]; then
     echo "    plain 'python3 -m venv' failed: ${venv_error:0:300}" >&2
     echo "==> retrying: venv --without-pip, then get-pip.py"
     "$PYTHON_BIN" -m venv --without-pip "$VENV"
+    find_venv_python
+    if [ -z "$VENV_PY" ]; then
+      echo "verdict: FAILED -- neither 'venv' nor 'venv --without-pip' left an interpreter under $VENV." >&2
+      echo "                Fix: apt-get install -y python3-venv python3-pip, then re-run bash bootstrap.sh" >&2
+      exit 1
+    fi
     if command -v curl >/dev/null 2>&1; then
       curl -fsSL https://bootstrap.pypa.io/get-pip.py -o "$VENV/get-pip.py"
     else
@@ -93,6 +128,11 @@ if [ ! -x "$VENV_PY" ]; then
     rm -f "$VENV/get-pip.py"
     echo "    pip bootstrapped into $VENV"
   fi
+fi
+if [ -z "$VENV_PY" ]; then
+  echo "verdict: FAILED -- $VENV exists but has no interpreter." >&2
+  echo "                Fix: delete $VENV and re-run bash bootstrap.sh" >&2
+  exit 1
 fi
 
 echo "==> installing .[$EXTRAS]"

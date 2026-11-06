@@ -424,6 +424,48 @@ pickvedio_core-1.0.1.tar.gz 113582 B
 也就是说"发布件教 agent 去读一个不存在的键"这个坑，现在是靠 zip 里的原文消除的，
 不是靠我在 README 里多说一句话。
 
+## 5h. 装配脚本的三处真故障，和 CI 抓住的我自己的 bug
+
+推荐路线的第一条命令是 `bash bootstrap.sh`，而它自己有三个失败面：
+
+1. **Debian/Ubuntu 云镜像上 `python3 -m venv` 根本不可能成功**（ensurepip 在独立的
+   `python3-venv` 包里）。现在会保留原始错误、改用 `venv --without-pip` 再从 PyPA 的
+   `get-pip.py` 装 pip；两条兜底各自失败时都点名 `apt-get install -y python3-venv`。
+   这条分支本机无法复现（Windows 没有这种坏镜像），所以它进了 CI：`ubuntu:24.04` +
+   发行版 python3，并且**先断言镜像真的是坏的**（`python3 -c "import ensurepip"` 必须失败），
+   否则那次绿什么也没证明。
+2. **Windows 上 `python3` 常常是 Microsoft Store 的执行别名**：`command -v` 找得到它，
+   一执行就退出码 49、什么都不打印。本机实测：
+   `which python3 = .../WindowsApps/python3`，`python3 -V` 与 `python3 -c ...` 均 rc=49。
+   旧代码只看"在不在 PATH"，于是选中它并报 `needs Python >= 3.10, found `（版本是空的）。
+   现在候选解释器必须真跑起来（`sys.version_info >= (3,10)` 探针）才会被选中。
+3. **我自己这次改动引入的 bug，被 CI 抓住**：把 `VENV_PY` 的判定挪到建 venv 之前，
+   Linux 上那时两个布局都还不存在，于是它落到 `Scripts/python.exe` 并且之后不再重算，
+   下一个命令直接 `No such file or directory`。CI 的
+   `Bootstrap (agent VM path)` 就是红在这里（`bootstrap.sh: line 99`）——不是新步骤红，
+   是我把主路径改坏了。修法是把解析收进 `find_venv_python()`，每次创建之后重新解析；
+   并在结尾再判一次空值给出可读错误。
+   同一个坑的第二个变体也当场出现：`set -euo pipefail` 下，赋值语句右侧的
+   `$(python3 -V …)` 失败会让整个脚本以 49 退出、连一行日志都没有——收集"为什么失败"的
+   那行自己把脚本杀了。现在用 `{ … || true; } | head -c 40` 包住。
+
+顺带清掉一个打包层的定时炸弹：`project.license` 写成 TOML 表已被 setuptools 弃用
+（警告里写明 2027-02-18 起不再支持），而且它会在**每一次**安装的输出里刷十几行，
+恰好是 Muse 会被迫读的那段。改成 `license = "MIT"` + `license-files`，
+`[build-system] requires` 提到 `setuptools>=77`。本机复验：`pip wheel .` 输出里
+`grep -ci deprecated` = 0，METADATA 出现 `License-Expression: MIT` 与 `License-File: LICENSE`，
+wheel 内含 LICENSE 文件。
+
+最后是这次踩到的"发布件落后于 HEAD"这一类问题的机制化防呆：
+
+- `__version__` 与 `pyproject.toml` 的 version 由一条测试钉住（两者不一致就红）；
+- CI 的安装 job 不再自己写死版本号——它从 `pyproject.toml` 读出版本、拼出
+  `PVC_INSTALL_SPEC`，并扫描 10 份随包文档，任何 git+ pin 或 Release 附件 pin 与之不符就红；
+  负对照是同一段分类器必须能抓出一行故意留下的 `@v1.0.1`；
+- `docs/verification.md` 自己在白名单里（那里的旧版本号是历史证据，不是指令）。
+
+出 1.0.2 就是为了让 pin、`install_spec()`、CI 拼出的地址与发布附件四者重新相等。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

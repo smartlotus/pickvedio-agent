@@ -357,6 +357,24 @@ def test_cli_resolve_declares_a_short_link_instead_of_an_unexplained_empty_id(se
     assert "hint" not in direct["data"]
 
 
+def test_package_version_literal_matches_pyproject():
+    """Two hand-edited version strings must not be able to disagree.
+
+    __version__ feeds install_spec(), so if pyproject says 1.0.2 and the module
+    says 1.0.1, the wheel installs as 1.0.2 while every runtime hint tells the
+    agent to pin @v1.0.1 -- i.e. the advice points at the previous release.
+    """
+    import re
+    from pathlib import Path
+
+    from pickvedio_core import __version__
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    match = re.search(r'^version = "([^"]+)"', pyproject.read_text(encoding="utf-8"), re.M)
+    assert match, "pyproject.toml no longer declares a plain version string"
+    assert __version__ == match.group(1), (__version__, match.group(1))
+
+
 def test_envelope_keeps_hint_inside_data_on_failure_too(settings, monkeypatch):
     """SKILL.md tells the agent to read `data.hint`, so that is where it goes.
 
@@ -642,7 +660,7 @@ def test_settings_load_survives_a_home_directory_that_cannot_be_resolved(tmp_pat
         [sys.executable, "-c",
          "from pickvedio_core.config import Settings;"
          "s = Settings.load(); print('ok', s.style, s.workdir)"],
-        env={"PATH": str(pathlib.Path(sys.executable).parent), "SYSTEMROOT": "C:\Windows",
+        env={"PATH": str(pathlib.Path(sys.executable).parent), "SYSTEMROOT": r"C:\Windows",
              "PVC_LLM_PROVIDER": "deepseek", "PVC_LLM_MODEL": "x", "PVC_LLM_API_KEY": "k",
              "PVC_WORKDIR": str(tmp_path)},
         capture_output=True, text=True, cwd=str(tmp_path),
