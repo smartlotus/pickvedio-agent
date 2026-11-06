@@ -529,6 +529,61 @@ def test_pipeline_reports_stage_transitions_in_order(settings, fixture_segments)
 
 
 
+DESKTOP_SUMMARY_SEED = {
+    # Copied in shape from a real ~/.pickvedio/settings.json written by the
+    # desktop app: the local-Ollama choice lives inside the *summary* block.
+    "provider": "ollama",
+    "api_preset": "ollama",
+    "base_url": "http://127.0.0.1:11434/v1",
+    "model": "gemma4:e4b",
+    "ollama_url": "http://127.0.0.1:11434",
+    "temperature": 0.2,
+    "chunk_chars": 18000,
+    "profile": "general",
+}
+
+
+def test_desktop_seed_does_not_leak_its_transport_into_another_provider(monkeypatch):
+    """Provider and endpoint travel together, so a seed cannot be read half-way.
+
+    Before this test existed, `PVC_LLM_PROVIDER=deepseek` on a machine with the
+    desktop settings file produced provider=deepseek + base_url=127.0.0.1:11434 +
+    model=gemma4:e4b, i.e. a DeepSeek-branded request to a local Ollama for a
+    model that endpoint never advertised.
+    """
+    from pickvedio_core.config import LLMSettings, PROVIDER_PRESETS
+
+    monkeypatch.setenv("PVC_LLM_PROVIDER", "deepseek")
+    for name in (
+        "PVC_PROVIDER",
+        "PVC_LLM_BASE_URL",
+        "PVC_LLM_MODEL",
+        "PVC_LLM_API_KEY",
+        "PVC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "OPENAI_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    llm = LLMSettings.from_env(DESKTOP_SUMMARY_SEED)
+    preset = PROVIDER_PRESETS["deepseek"]
+    assert llm.base_url == preset["base_url"], llm.base_url
+    assert llm.model == preset["model"], llm.model
+    assert not llm.api_key
+
+
+def test_desktop_seed_still_drives_the_local_ollama_path(monkeypatch):
+    """The fix must not break the case the seed exists for."""
+    from pickvedio_core.config import LLMSettings, OllamaSettings
+
+    for name in ("PVC_LLM_PROVIDER", "PVC_PROVIDER", "PVC_LLM_BASE_URL", "PVC_LLM_MODEL", "PVC_OLLAMA_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    llm = LLMSettings.from_env(DESKTOP_SUMMARY_SEED)
+    assert llm.provider == "ollama"
+    assert llm.base_url == "http://127.0.0.1:11434/v1"
+    assert llm.model == "gemma4:e4b"
+    assert OllamaSettings.from_env(DESKTOP_SUMMARY_SEED).enabled is True
+
+
 def test_settings_load_survives_a_home_directory_that_cannot_be_resolved(tmp_path, monkeypatch):
     """A container without HOME must still boot.
 

@@ -334,6 +334,30 @@ curl -L .../releases/download/v1.0.0/pickvedio_core-1.0.0-py3-none-any.whl -> 20
 `Publish to PyPI` 在这次真推里是 `skipped`（预期的默认态，因为 `PYPI_PUBLISH` 未设置），
 不再是"每次发布必红一格"。
 
+## 5f. 桌面种子文件会跨 provider 污染传输层
+
+为了跑 §2.3 的自检，我在本机起了一个 `PVC_LLM_PROVIDER=deepseek` 的服务，`/healthz` 却回答
+`"llm_model": "gemma4:e4b"`。这不是显示问题，是配置真的被换掉了：
+
+- 本机 `~/.pickvedio/settings.json` 的 `summary` 块是桌面版写的，里面
+  `provider=ollama`、`base_url=http://127.0.0.1:11434/v1`、`model=gemma4:e4b`（我用只打印
+  结构和长度的方式核过，没打印任何密钥）。
+- `LLMSettings.from_env` 的取值顺序是 `env → seed → preset`，而 seed 的 `base_url`/`model`
+  **不看 provider 是否一致**就被采纳。于是 deepseek 的名字配上 Ollama 的端点和模型名——
+  请求会打到 127.0.0.1:11434 要一个 `gemma4:e4b`，失败信息完全没法反推出原因。
+- 复刻旧表达式的对照（同 seed、同环境变量）：
+  `OLD -> http://127.0.0.1:11434/v1 gemma4:e4b` / `NEW -> https://api.deepseek.com/v1 deepseek-chat`。
+
+修法是把 seed 当作"传输层来源"的资格绑在 provider 一致上（`transport = seed if 一致 else {}`），
+`temperature`/`chunk_chars`/`profile_prompts` 这些与端点无关的字段照旧从 seed 读。
+两条测试一起进：一条断言换 provider 后必须回到预设，另一条断言"什么都不设"时
+桌面版那条本地 Ollama 路径仍然按 seed 走——防止修过头。seed 只在装有桌面版的机器上存在，
+所以 Muse 云电脑与 Railway 容器本来不受影响；受影响的是用户自己的这台机。
+
+顺带一条环境事实（不是缺陷）：本机 shell 里存在 `DEEPSEEK_API_KEY`/`OPENAI_API_KEY`
+之类变量，`_env` 会按别名顺序读到它们，所以在这台机上 `llm_configured` 会是 true。
+CI 里不存在这些变量，`pvc check`/`pvc status` 的判定不依赖它们。
+
 ## 6. 尚未验证 / still to verify after deployment
 
 - A real Railway (or other) deploy answering `/healthz` over the public internet.

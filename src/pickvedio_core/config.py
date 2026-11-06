@@ -93,14 +93,22 @@ class LLMSettings:
             seed.get("provider") or "deepseek"
         )
         preset = PROVIDER_PRESETS.get(provider.lower(), {})
+        # A seeded base_url / api_key / model belongs to the provider that wrote
+        # them. The desktop app keeps its local-Ollama choice in this very block
+        # (`gemma4:e4b` on 127.0.0.1:11434), so honouring it under
+        # PVC_LLM_PROVIDER=deepseek sent a DeepSeek-branded request to a local
+        # Ollama URL for a model that endpoint never heard of -- and
+        # `pvc status` cheerfully reported provider=deepseek, model=gemma4:e4b.
+        # The seed only counts as a transport source when the provider agrees.
+        transport = seed if str(seed.get("provider") or "").strip().lower() == provider.strip().lower() else {}
         return cls(
             provider=provider,
             base_url=_env("PVC_LLM_BASE_URL", default="")
-            or str(seed.get("base_url") or "")
+            or str(transport.get("base_url") or "")
             or preset.get("base_url", ""),
             api_key=_env("PVC_LLM_API_KEY", "PVC_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY")
-            or str(seed.get("api_key") or ""),
-            model=_env("PVC_LLM_MODEL", default="") or str(seed.get("model") or "") or preset.get("model", ""),
+            or str(transport.get("api_key") or ""),
+            model=_env("PVC_LLM_MODEL", default="") or str(transport.get("model") or "") or preset.get("model", ""),
             temperature=_env_float("PVC_LLM_TEMPERATURE", default=None)
             if _env("PVC_LLM_TEMPERATURE")
             else float(seed.get("temperature", 0.2)),
