@@ -466,6 +466,34 @@ wheel 内含 LICENSE 文件。
 
 出 1.0.2 就是为了让 pin、`install_spec()`、CI 拼出的地址与发布附件四者重新相等。
 
+## 5i. 门自己也会坏：CI 抓住的第二轮，和发布件的事后实测
+
+§5h 那道"文档 pin 必须等于 pyproject 版本"的 gate，第一次上 CI 就红了自己：
+扫描步骤的 unquoted heredoc 里插值的是 `$VERSION`，而 derive 步骤写进 `GITHUB_ENV`
+的名字是 `PVC_VERSION`——后者才会导出给后续步骤，前者在那个 step 里展开为空串，
+gate 于是报 "could not read a version out of pyproject.toml"（run 42246378362 的
+`Install (documented route)`，4060e12；工作区里一度出现的半截修复 `$PVC_VERSION`
+拼写也被同一个 run 判定不足）。修法不修拼写、修整类：heredoc 加引号，版本改从
+`pyproject.toml` 直接读，删掉"shell 传版本"这一整条路（b6ce80a）。同一个提交上
+CI 与 Docker 两个工作流全绿（run 42247626605 / 42247626406）。规律与 §5h 第 3 条
+一致：bug 总是长在"验证别人的那一侧"。
+
+v1.0.2 tag 在 4060e12 上推送，release.yml 于 41 秒后自行发布三件附件。b6ce80a
+只改了 `.github/workflows/`，而附件内容不包含 workflow 文件，所以发布件与修复后
+HEAD 构建结果一致，不重切。但"应该一致"不是证据，发布之后补了两条独立实测
+（与 CI 完全无关，本机执行）：
+
+1. 干净 venv、无任何令牌，`pip install "pickvedio-core[service] @
+   https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.2/pickvedio_core-1.0.2-py3-none-any.whl"`
+   —— 安装成功，`pvc --help` 正常，`pvc check` 报 `ok:true` / `network_used:false`，
+   `pickvedio_core.__version__ == "1.0.2"`。README 那句"匿名可下载，已实测 pip 能
+   取到并装上 1.0.2"在 4060e12 写下时是预测，此刻起才是测量。
+2. skill zip 匿名下载原样解包：正好 7 个条目；`SKILL.md` frontmatter 含 Muse 必需的
+   `name` / `description` / `icon` / `metadata` 四键；包内全部安装 pin 均为 `@v1.0.2`。
+
+dependabot 的 actions 升级 PR（#1）rebase 到 4060e12 之后，继承了同一个红 job；
+让它再 rebase 到 b6ce80a 上重跑，等绿再合，不盲并。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
