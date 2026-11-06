@@ -219,6 +219,20 @@ class ASRSettings:
         return f"PVC_ASR_PROVIDER={self.provider} 但缺少 {'、'.join(missing)}。" if missing else ""
 
 
+def _desktop_seed_path() -> Path | None:
+    """The desktop app's optional settings file, or None when it has no home.
+
+    A minimal container image can lack HOME/USERPROFILE entirely, and
+    ``Path.home()`` then raises RuntimeError. Losing the whole service at import
+    time because an *optional* seed file could not be located is not an
+    acceptable failure, so the lookup is contained here.
+    """
+    try:
+        return Path.home() / ".pickvedio" / "settings.json"
+    except (RuntimeError, OSError):
+        return None
+
+
 @dataclass(slots=True)
 class Settings:
     llm: LLMSettings = field(default_factory=LLMSettings)
@@ -243,8 +257,9 @@ class Settings:
     @classmethod
     def load(cls, overrides: dict[str, Any] | None = None) -> Settings:
         seed: dict[str, Any] = {}
-        config_path = Path(_env("PVC_CONFIG_FILE", default="") or (Path.home() / ".pickvedio" / "settings.json"))
-        if config_path.is_file():
+        configured = _env("PVC_CONFIG_FILE", default="")
+        config_path = Path(configured) if configured else _desktop_seed_path()
+        if config_path is not None and config_path.is_file():
             try:
                 seed = json.loads(config_path.read_text(encoding="utf-8"))
             except (OSError, ValueError):

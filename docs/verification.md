@@ -134,6 +134,7 @@ Both were real, and both were invisible on the author's machine:
 | --- | --- |
 | `service/` 在仓库根目录，不属于安装的包 → 安装后 `import service.app` 失败，`uvicorn service.app:app` 与 `pvc serve` 在真实主机上会崩 | 本机 pytest 与 `pvc serve` 的 cwd 就是仓库根，旁边正好有个 `service/` 目录;而 CI 里那句 `python -c "import service.app"` 同样在仓库根运行,所以它绿着发布了一个假的部署承诺 |
 | `pvc push --transcript '<内联 JSON>'` 在 Linux 上抛 `OSError(ENAMETOOLONG)` | 代码用 `Path(整段文本).is_file()` 判断"这是不是文件路径";Windows 对超长路径返回 False,Linux 的 `stat()` 直接抛错。长度也刚好只在 CI 的 fixture 规模上越界 |
+| 没有 `HOME`/`USERPROFILE` 的容器里，服务在 import 阶段就 `RuntimeError: Could not determine home directory` 崩掉 | 可选的桌面版种子配置文件用了裸的 `Path.home()`。本机的 `Settings.load()` 永远能找到家目录，所以这条路径只在真实启动服务时才暴露——它是被一次本地端到端演示抓到的，不是被测试抓到的 |
 
 修复与门禁 / fixes and gates:
 
@@ -144,6 +145,9 @@ Both were real, and both were invisible on the author's machine:
   `test_cli_push_accepts_a_large_inline_transcript` 两条正对照。
 - 原先"轮询看到过 summarizing"的断言依赖桩模型速度，属于会随机变的测试；改为用 spy store
   确定性断言阶段序列 (`test_pipeline_reports_stage_transitions_in_order`)。
+- 家目录查不到时改为返回 `None` 并跳过可选种子（`_desktop_seed_path`）；对应的
+  `test_settings_load_survives_a_home_directory_that_cannot_be_resolved` 带**负对照**：
+  已单独验证该探针环境里 `Path.home()` 确实抛 `RuntimeError`，否则这条测试只是空转。
 
 What the suite actually exercises, and how far:
 

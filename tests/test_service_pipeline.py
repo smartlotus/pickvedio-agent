@@ -8,6 +8,7 @@ against a mock of themselves.
 from __future__ import annotations
 
 import json
+import pathlib
 import time
 
 import pytest
@@ -489,6 +490,30 @@ def test_pipeline_reports_stage_transitions_in_order(settings, fixture_segments)
     distinct = [stage for index, stage in enumerate(seen) if index == 0 or stage != seen[index - 1]]
     assert distinct == ["resolving", "summarizing", "finalizing"], seen
     assert store.get(record.id).stage == "completed"
+
+
+
+def test_settings_load_survives_a_home_directory_that_cannot_be_resolved(tmp_path, monkeypatch):
+    """A container without HOME must still boot.
+
+    The desktop-app seed file is optional. Its lookup used to call
+    ``Path.home()`` unguarded, which raises RuntimeError on a stripped image,
+    and the whole service died at import time over a file it did not need.
+    """
+    import subprocess
+    import sys
+
+    probe = subprocess.run(
+        [sys.executable, "-c",
+         "from pickvedio_core.config import Settings;"
+         "s = Settings.load(); print('ok', s.style, s.workdir)"],
+        env={"PATH": str(pathlib.Path(sys.executable).parent), "SYSTEMROOT": "C:\Windows",
+             "PVC_LLM_PROVIDER": "deepseek", "PVC_LLM_MODEL": "x", "PVC_LLM_API_KEY": "k",
+             "PVC_WORKDIR": str(tmp_path)},
+        capture_output=True, text=True, cwd=str(tmp_path),
+    )
+    assert probe.returncode == 0, (probe.stdout, probe.stderr[-600:])
+    assert probe.stdout.startswith("ok general")
 
 
 
