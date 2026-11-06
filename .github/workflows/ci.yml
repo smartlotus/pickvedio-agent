@@ -208,11 +208,26 @@ jobs:
 
       - name: Every documented pin is this version
         run: |
-          python - <<PY
+          python - <<'PY'
           import re, sys
           from pathlib import Path
 
-          version = "$VERSION".strip('"')
+          # Read the version out of pyproject.toml here instead of through the
+          # shell. The first version of this step interpolating "$VERSION" failed
+          # in CI -- that name was never exported; the derive step exported
+          # PVC_VERSION -- and the gate then reported "could not read a version
+          # out of pyproject.toml" while the step above had printed the version
+          # correctly one line earlier. Provenance note: an uncommitted edit
+          # appeared in this file mid-session renaming that to $PVC_VERSION with a
+          # comment claiming the bug was caught locally; it was caught by CI
+          # (run 42246378362), so reading the file directly removes the whole
+          # class instead of fixing one spelling.
+          raw = Path("pyproject.toml").read_text(encoding="utf-8")
+          found = re.search(r'^version = "([^"]+)"', raw, re.M)
+          if found is None:
+              print("::error::no plain version string in pyproject.toml")
+              sys.exit(1)
+          version = found.group(1)
           files = [Path("README.md"), Path("AGENTS.md"), *Path(".").glob("docs/*.md"),
                    *Path(".").glob("deploy/*.md"), *Path(".").glob("skills/**/*.md")]
           stale = []
@@ -234,6 +249,19 @@ jobs:
               for item in stale:
                   print("  ", item)
               sys.exit(1)
+          # The gate is only worth having if it can go red. Feed both regexes a
+          # deliberately stale pin and require that they flag it; if a future
+          # edit ever numbed them, this fails instead of silently passing.
+          probe = ('pip install "pickvedio-core @ git+https://github.com/'
+                   'pickvedio-agent@v0.0.0" # .../releases/download/v0.0.0/x.whl')
+          probe_hits = [v for v in re.findall(r"pickvedio-agent@v(\d+\.\d+\.\d+)", probe)
+                        if v != version]
+          probe_hits += [v for v in re.findall(r"download/v(\d+\.\d+\.\d+)/", probe)
+                         if v != version]
+          if not probe_hits:
+              print("::error::the stale-pin classifier no longer catches its own probe")
+              sys.exit(1)
+          print(f"negative control OK: a stale pin (@v{probe_hits[0]}) is caught")
           print(f"every documented install pin is v{version} (verification.md exempt as history)")
           PY
 
