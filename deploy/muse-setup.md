@@ -138,12 +138,15 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
    PVC_ASR_PROVIDER 先留空，等我确认要花钱再开。
 3. 给服务挂一个 Volume，挂载路径 /data（不挂卷的话重新部署会丢掉任务状态）。
 4. 部署完成后把服务域名告诉我，只给域名，不要带任何密钥。
-5. 然后依次验证，每一步的原始输出都贴给我：
+5. 然后依次验证。先在你自己的云电脑里按路线 1 的方法装上命令行
+   （git clone + bash bootstrap.sh，看到 "verdict: READY"），再用它指向刚部署的域名，
+   每一步的原始输出都贴给我：
    curl -fsS "https://<域名>/healthz"
    curl -fsS "https://<域名>/openapi.json" | head -c 400
-   pvc status
-   pvc status --service "https://<域名>"
-   pvc check
+   .venv/bin/pvc status
+   .venv/bin/pvc status --service "https://<域名>" --token "<PVC_API_TOKEN>"
+   .venv/bin/pvc check
+   （pvc 装在 Railway 服务里是查不了的：那个容器只跑 HTTP 服务。）
 6. 任何一步失败：先贴命令、错误码 code 和 message，再说你的判断；不要连续重试超过两次。
 ```
 
