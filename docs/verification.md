@@ -1237,7 +1237,44 @@ CI @9152bf6：14 个作业全绿，唯一非 success 是被有意跳过的 PyPI 
 
 比较按 LF 归一而不是原始字节：这台机 `core.autocrlf=true`，工作区副本可能是 CRLF。
 
+## 5dd. 文档里那条命令，现在是真的被执行
 
+前面每一条测试都是用 Python 字面量拼 argv，所以文档一旦与代码走偏——flag 改名、
+漏了 --url、占位符没人替换——测试照样全绿，而 Muse 上的 agent 照文档敲就失败。
+粘贴块本身就是产品界面，所以补了 tests/test_skill_commands_execute.py（3 条）：
+它从 SKILL.md、deploy-runbook、muse-setup 三份文件里**抽出**那行免 key 命令，
+自己替换占位符，自己跑。
+
+判红能力不是假设：第一版我把说明性的语法行（含 `[--out FILE]` 记法）也当成命令
+抽了出来，argparse 立刻 rc=2 抛 SystemExit，测试当场红——这就是"这个文件会红"的
+实测证据。修正后的口径是：带方括号或 FILE 的行是语法记法，不是可执行示例，跳过。
+
+- 同一条抽出来的 argv，喂胖 payload → rc=0、segments 120 段、--out 落盘字节 == data.segments
+- 喂稀疏 payload → rc=1、code=sparse_transcript、data.hint 非空
+- 三份文件都必须还能抽出这行（少一份就红，防止文档被删后测试静默空转）
+- fixture 把 build_client 与 ladder.resolve 都设成一碰就炸，用来证明文档承诺的
+  "不联网、不调模型"
+
+全量：181 passed / 0 failed / ruff clean。
+
+这台机结构上验不了的两件事（是条件挡住，不是产品挡住）：
+
+1. 本机浏览器对 B 站是**登出**状态：页面里调 `nav` 接口 code=-101、isLogin=false、
+   document.cookie 里没有 SESSDATA。所以"登录会话真能下发字幕轨道"这一半在这台机上
+   不可能验。我**没有**去读你浏览器里的 Cookie 来凑成登录——那是你的凭据不是我的测试
+   材料，而且这正是本项目明令禁止的方向。
+2. 抽取器的 **YouTube 分支至今没有真页面实测**：本机导航到 watch URL 直接
+   ERR_CONNECTION_TIMED_OUT（路由层不通，与工具无关）。也就是说 browser-extract.js
+   里 YouTube 那半代码从未在真实页面上跑过。能访问 YouTube 的机器（比如 Muse）第一件
+   该试的就是它。
+
+## 6. 尚未验证 / still to verify after deployment
+
+- The extractor's YouTube branch has never run against a live page. This box
+  cannot reach YouTube at all (`ERR_CONNECTION_TIMED_OUT` navigating to a watch
+  URL), so no line of the shipped asset's YouTube half has real-world evidence
+  behind it -- see §5dd item 2. On a machine that can reach YouTube, that is the
+  first thing to exercise.
 - Nesting the *success* payloads of the meta endpoints under `data` (the error
   replies are flat since 1.0.12; `/v1/profiles` and friends still answer with
   extra top-level keys). Deliberately left undone: it is a breaking change for
