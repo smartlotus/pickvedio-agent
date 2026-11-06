@@ -160,6 +160,206 @@ async function pickvedioExtract(options) {
     return out;
   }
 
+  /**
+   * Caption body -> rows, whatever format YouTube answered with.
+   *
+   * JSON3 is preferred because it carries per-window timings, but a real watch
+   * page can hand back XML (the default `timedtext` shape) or an empty body for
+   * a forced format. Sniffing the bytes instead of assuming the request won is
+   * what makes this survive the platform changing its default underneath.
+   */
+  function captionRows(text) {
+    const body = String(text == null ? "" : text).replace(/^/, "");
+    const head = body.trim().charAt(0);
+    if (head === "{") {
+      let payload = null;
+      try {
+        payload = JSON.parse(body);
+      } catch (error) {
+        return { format: "json3", rows: [], count: 0 };
+      }
+      const events = (payload && payload.events) || [];
+      const rows = [];
+      for (const event of events) {
+        const segs = (event && event.segs) || [];
+        if (!segs.length) continue; // window-events carry timing but no text
+        rows.push({
+          start: num(event.tStartMs) === null ? 0 : num(event.tStartMs) / 1000,
+          duration: num(event.dDurationMs) === null ? 0 : num(event.dDurationMs) / 1000,
+          text: segs.map((seg) => (seg && typeof seg.utf8 === "string" ? seg.utf8 : "")).join(""),
+        });
+      }
+      return { format: "json3", rows: rows, count: events.length };
+    }
+    if (head === "<") {
+      // srv1/srv3: <text start="1.0" dur="3.2">…</text>, entities and <font>/
+      // <code>…</code> markup included, since a manual track styles rather than
+      // speaks.
+      const rows = [];
+      const pattern = /<text\b([^>]*)>([\s\S]*?)<\/text>/g;
+      let match;
+      while ((match = pattern.exec(body)) !== null) {
+        const attrs = match[1] || "";
+        const start = num((attrs.match(/start=["']([^"']+)["']/) || [])[1]);
+        const dur = num((attrs.match(/dur=["']([^"']+)["']/) || [])[1]);
+        const raw = match[2]
+          .replace(/<[^>]*>/g, " ")
+          .replace(/&amp;/g, "&")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;|&apos;/g, "'")
+          .replace(/&nbsp;/g, " ");
+        rows.push({ start: start === null ? 0 : start, duration: dur === null ? 0 : dur, text: raw });
+      }
+      return { format: "srv3", rows: rows, count: rows.length };
+    }
+    return { format: "unknown", rows: [], count: 0 };
+  }
+
+  /**
+   * Start muted playback so the player issues its own caption request.
+   *
+   * Both platforms bind caption bodies to an active playback session. Muted
+   * play() is exempt from autoplay blocking, so this works in an automated
+   * page without a user gesture. Returns a description of what happened, or
+   * null when there was nothing to nudge -- and the caller must not pretend a
+   * caption body arrived when it did not.
+   */
+  async function startPlayback(kind) {
+    const video = document.querySelector("video");
+    if (!video) {
+      const button = document.querySelector(
+        kind === "youtube"
+          ? "button[aria-label*='播放'], button[aria-label*='Play'], ytd-thumbnail a#thumbnail"
+          : ".bpx-player-ctrl-btn-play, .bilibili-player-video-btn"
+      );
+      if (!button) return null;
+      button.click();
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return "clicked-play-button";
+    }
+    const wasMuted = video.muted;
+    try {
+      video.muted = true;
+      if (video.paused) await video.play();
+    } catch (error) {
+      video.muted = wasMuted;
+      return null;
+    }
+    // Wait for real media time to advance: that is the signal the player has
+    // begun requesting caption payloads, not merely that play() resolved.
+    const deadline = Date.now() + 6000;
+    while (Date.now() < deadline) {
+      if (video.currentTime > 0.5 && video.readyState >= 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    const moved = video.currentTime;
+    if (!wasMuted) video.muted = true; // stay silent; restore nothing audible
+    try {
+      video.pause();
+    } catch (error) {
+      /* pausing is best-effort */
+    }
+    return moved > 0.5 ? "muted-playback-" + moved.toFixed(1) + "s" : null;
+  }
+
+  /**
+   * Buffer caption bodies the page itself already received.
+   *
+   * A re-issued `timedtext` request can come back empty while the player's own
+   * request for the same track succeeded: the response is bound to the fetch
+   * that carried the player's attestation. Hooking fetch/XHR before the track
+   * loads, then reading the buffer, is what lets an extraction run that starts
+   * after playback recover the text instead of reporting nothing.
+   */
+  const captionBuffer = [];
+  function installCaptionBuffer() {
+    if (window.__pvcCaptionBuffered) return;
+    window.__pvcCaptionBuffered = true;
+    const looksLikeCaption = (u) => /timedtext|api\.youtube\.com\/api\/timedtext|subtitle_url|\/proxy\/www\.youtube\.com\/api\/timedtext/i.test(String(u || ""));
+    const originalFetch = window.fetch;
+    if (typeof originalFetch === "function") {
+      window.fetch = function (input, init) {
+        const url = typeof input === "string" ? input : (input && input.url) || "";
+        return originalFetch.apply(this, arguments).then((response) => {
+          if (looksLikeCaption(url)) {
+            try {
+              response
+                .clone()
+                .text()
+                .then((text) => {
+                  if (text && text.trim()) captionBuffer.push({ via: "fetch", url: url, text: text });
+                })
+                .catch(() => {});
+            } catch (error) {
+              /* a consumed body is simply not recorded */
+            }
+          }
+          return response;
+        });
+      };
+    }
+    const OriginalOpen = XMLHttpRequest.prototype.open;
+    const OriginalSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.open = function (method, url) {
+      this.__pvcUrl = String(url || "");
+      return OriginalOpen.apply(this, arguments);
+    };
+    XMLHttpRequest.prototype.send = function () {
+      const xhr = this;
+      xhr.addEventListener("load", () => {
+        try {
+          if (looksLikeCaption(xhr.__pvcUrl) && xhr.responseText && xhr.responseText.trim()) {
+            captionBuffer.push({ via: "xhr", url: xhr.__pvcUrl, text: xhr.responseText });
+          }
+        } catch (error) {
+          /* some response types are unreadable; ignore */
+        }
+      });
+      return OriginalSend.apply(this, arguments);
+    };
+  }
+
+  function rowsFromBuffer() {
+    for (const entry of captionBuffer) {
+      const parsed = captionRows(entry.text);
+      if (parsed.rows.length) {
+        return Object.assign(parsed, { via: entry.via });
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Ask the player, through its own control, to display subtitles.
+   *
+   * This is the same click a user makes; it does not reach into any internal
+   * state and it cannot grant anything the session is not already allowed.
+   */
+  async function toggleCaptionsOn() {
+    const selectors = [
+      "button.ytp-subtitles-button",
+      "[aria-label*='subtitles' i]",
+      "[aria-label*='字幕' i]",
+      "[aria-label*='cc' i]",
+      ".bpx-player-ctrl-subtitle",
+    ];
+    for (const selector of selectors) {
+      const button = document.querySelector(selector);
+      if (!button) continue;
+      const pressed = button.getAttribute && button.getAttribute("aria-pressed");
+      if (pressed === "true") return "already-on:" + selector;
+      try {
+        button.click();
+      } catch (error) {
+        continue;
+      }
+      return "clicked:" + selector;
+    }
+    return null;
+  }
+
   // ------------------------------------------------------------------ bilibili
   async function bilibili() {
     result.platform = "bilibili";
@@ -209,26 +409,63 @@ async function pickvedioExtract(options) {
     }
 
     if (!cid) {
-      const viewParams = bvid ? "bvid=" + encodeURIComponent(bvid) : "aid=" + String(aid);
-      try {
-        const view = await apiGet("/x/web-interface/view", viewParams);
-        const data = (view && view.data) || {};
-        result.title = String(data.title || result.title);
-        result.durationSeconds = num(data.duration) || result.durationSeconds;
-        cid = num(data.cid) || (data.pages && data.pages[part - 1] && num(data.pages[part - 1].cid)) || null;
-        if (data.pages && data.pages.length > 1) {
-          warn("Multi-part video: using part " + part + " (cid " + cid + "). Other parts need their own page.");
+      // Resolve the part id through every documented endpoint, in order of how
+      // little they demand. `pagelist` is the lightest and answers for a BV id
+      // alone; `view` is what the page itself uses but has been observed to 404
+      // when the session landed on a non-Chinese locale route. Returning on the
+      // first failure turned a resolvable video into "view_api_failed".
+      const resolvers = [
+        {
+          path: "/x/player/pagelist",
+          params: (bvid ? "bvid=" + encodeURIComponent(bvid) : "aid=" + String(aid)) + "&platform=html5",
+          pick: (payload) => {
+            const pages = (payload && payload.data) || [];
+            return { cid: num((pages[part - 1] || pages[0] || {}).cid), parts: pages.length };
+          },
+        },
+        {
+          path: "/x/web-interface/view",
+          params: bvid ? "bvid=" + encodeURIComponent(bvid) : "aid=" + String(aid),
+          pick: (payload) => {
+            const data = (payload && payload.data) || {};
+            const pages = data.pages || [];
+            return {
+              cid: num(data.cid) || num((pages[part - 1] || pages[0] || {}).cid),
+              parts: pages.length,
+              title: data.title,
+              duration: num(data.duration),
+            };
+          },
+        },
+      ];
+      const failures = [];
+      for (const resolver of resolvers) {
+        try {
+          const payload = await apiGet(resolver.path, resolver.params);
+          const found = resolver.pick(payload);
+          if (found && found.cid) {
+            cid = found.cid;
+            if (found.title) result.title = String(found.title);
+            if (found.duration) result.durationSeconds = found.duration;
+            if (found.parts > 1) {
+              warn("Multi-part video: using part " + part + " (cid " + cid + "). Other parts need their own page.");
+            }
+            break;
+          }
+          failures.push(resolver.path + ":no_cid");
+        } catch (error) {
+          failures.push(resolver.path + ":" + (error.status ? "http " + error.status : error.message));
         }
-      } catch (error) {
-        result.reason = "view_api_failed";
-        warn("web-interface/view failed: " + (error.status ? "http " + error.status : error.message));
-        return;
       }
+      if (failures.length && !cid) warn("cid resolution attempts: " + failures.join(" | "));
     }
 
     if (!cid) {
       result.reason = "no_cid";
-      warn("No cid could be resolved, so no subtitle track can be requested.");
+      warn(
+        "No cid could be resolved from the page state, /x/player/pagelist or /x/web-interface/view, " +
+          "so no subtitle track can be requested."
+      );
       return;
     }
 
@@ -364,41 +601,102 @@ async function pickvedioExtract(options) {
     );
     result.trackKind = isAsr ? "asr" : "manual";
 
-    // baseUrl already carries the signed query; fmt is the only addition, and
-    // it must replace any fmt already present rather than duplicate it.
-    let base = absolute(track.baseUrl).replace(/([?&])fmt=[^&]*/, "");
-    base += (base.indexOf("?") >= 0 ? "&" : "?") + "fmt=json3";
+    // `baseUrl` carries a signed query bound to this page view, so it is reused
+    // verbatim and only `fmt` is exchanged. Formats are tried in order:
+    // json3 (structured), srv3 (XML with timings), then the untouched URL,
+    // because YouTube answers the *default* format with XML and a forced
+    // `fmt=json3` can come back empty for tracks the page itself plays fine --
+    // that is the case that showed up against a real watch page.
+    const root = absolute(track.baseUrl).replace(/([?&])fmt=[^&]*/, "");
+    const withFmt = (fmt) => root + (root.indexOf("?") >= 0 ? "&" : "?") + "fmt=" + fmt;
+    let candidates = [withFmt("json3"), withFmt("srv3"), root];
     if (opts.translateTo) {
       if (isAsr) {
-        base += "&tlang=" + encodeURIComponent(opts.translateTo);
+        candidates = candidates.map((u) => u + "&tlang=" + encodeURIComponent(opts.translateTo));
         result.translatedTo = String(opts.translateTo);
       } else {
         warn("translateTo was ignored: only auto-generated (kind=asr) tracks can be machine-translated.");
       }
     }
 
-    let payload;
-    try {
-      payload = await getJson(base);
-    } catch (error) {
+    let rows = [];
+    let eventsSeen = null;
+    let lastError = null;
+    const attemptFetch = async () => {
+      const collected = [];
+      for (const candidate of candidates) {
+        let text;
+        try {
+          const response = await fetch(candidate, { credentials: "include" });
+          text = await response.text();
+          if (!response.ok) {
+            lastError = { status: response.status };
+            continue;
+          }
+        } catch (error) {
+          lastError = { message: String(error && error.message) };
+          continue;
+        }
+        if (!text || !text.trim()) {
+          lastError = { message: "empty_body" };
+          continue;
+        }
+        const parsed = captionRows(text);
+        if (parsed.rows.length) {
+          return { ok: true, parsed: parsed };
+        }
+        collected.push(parsed.format + ":0");
+        lastError = { message: "no_rows_in_" + parsed.format };
+      }
+      return { ok: false, note: collected.join(",") };
+    };
+
+    let outcome = await rowsFromBuffer() ? { ok: true, parsed: rowsFromBuffer() } : await attemptFetch();
+    if (!outcome.ok && !rowsFromBuffer()) {
+      // The page may have fetched captions before this script was evaluated, or
+      // after a player-side subtitle toggle. Turning captions on in the player
+      // UI makes the *player* re-request the track, which the hook then sees.
+      const toggled = await toggleCaptionsOn();
+      if (toggled) {
+        result.captionToggle = toggled;
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        const buffered = rowsFromBuffer();
+        if (buffered) outcome = { ok: true, parsed: buffered };
+      }
+    }
+    if (!outcome.ok && opts.nudge) {
+      // YouTube lists caption tracks but serves an EMPTY timedtext body until the
+      // player has actually started: the response is bound to the playback
+      // session. Muted playback is allowed by every autoplay policy, so this
+      // costs one second and turns "caption_body_failed" into real text. Bilibili
+      // needs the same nudge for its AI subtitle request.
+      const nudged = await startPlayback("youtube");
+      if (nudged) {
+        result.playbackNudge = nudged;
+        outcome = await attemptFetch();
+      }
+    }
+    if (outcome.ok) {
+      rows = outcome.parsed.rows;
+      eventsSeen = outcome.parsed.count;
+      result.captionFormat = outcome.parsed.format;
+      if (outcome.parsed.via) result.captionSource = outcome.parsed.via;
+    } else {
       result.reason =
-        error.status === 429 ? "rate_limited" : error.status === 401 || error.status === 403 ? "caption_forbidden" : "caption_body_failed";
-      warn("timedtext fetch failed: " + (error.status ? "http " + error.status : error.message));
+        lastError && lastError.status === 429
+          ? "rate_limited"
+          : lastError && (lastError.status === 401 || lastError.status === 403)
+            ? "caption_forbidden"
+            : "caption_body_failed";
+      warn(
+        "timedtext fetch failed: " +
+          (lastError && (lastError.status ? "http " + lastError.status : lastError.message)) +
+          (result.playbackNudge ? " (after starting muted playback)" : " (playback nudge unavailable)")
+      );
       return;
     }
 
-    const events = (payload && payload.events) || [];
-    const rows = [];
-    for (const event of events) {
-      const segs = (event && event.segs) || [];
-      if (!segs.length) continue; // window-events carry timing but no text
-      rows.push({
-        start: num(event.tStartMs) === null ? 0 : num(event.tStartMs) / 1000,
-        duration: num(event.dDurationMs) === null ? 0 : num(event.dDurationMs) / 1000,
-        text: segs.map((seg) => (seg && typeof seg.utf8 === "string" ? seg.utf8 : "")).join(""),
-      });
-    }
-    result.eventCount = events.length;
+    result.eventCount = eventsSeen === null ? rows.length : eventsSeen;
     result.segments = normalize(rows);
     if (!result.segments.length) result.reason = "caption_body_empty";
   }

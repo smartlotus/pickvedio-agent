@@ -544,6 +544,34 @@ def test_flags_before_the_subcommand_are_not_clobbered_by_its_defaults(service_s
 
 
 
+def test_cli_stdout_is_utf8_regardless_of_console_codepage(tmp_path):
+    """The envelope promise is only real if the bytes are parseable everywhere.
+
+    On a cp936 console a redirected stream inherits the codepage, so Chinese in
+    a title or a profile label came out as bytes no JSON reader could decode --
+    caught by bootstrap.sh parsing its own `pvc check` output. Runs the installed
+    console script with the environment stripped of any UTF-8 hint.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = {key: value for key, value in os.environ.items() if "IOENCODING" not in key.upper()}
+    script = str(pathlib.Path(sys.executable).parent / ("pvc.exe" if os.name == "nt" else "pvc"))
+    if not pathlib.Path(script).is_file():
+        script = ""
+    cmd = [script or sys.executable] + ([] if script else ["-m", "pvc.cli"])
+    proc = subprocess.run(cmd + ["profiles"], capture_output=True, env=env, cwd=str(tmp_path))
+    assert proc.returncode == 0, proc.stderr[-400:]
+    text = proc.stdout.decode("utf-8")  # raises if the CLI wrote cp936 bytes
+    doc = json.loads(text)
+    assert doc["ok"] is True
+    labels = {item["profile"]: item for item in doc["data"]["profiles"]}
+    assert labels["general"]["label"].startswith("通用")
+    assert "速览" in text  # a second Chinese label survives the round trip
+
+
+
 def _minimal_report():
     from pickvedio_core.models import Report, SourceKind
 

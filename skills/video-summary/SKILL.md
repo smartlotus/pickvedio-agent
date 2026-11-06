@@ -18,7 +18,12 @@ summarising. 输入一条链接，输出带时间戳的中文分层总结。
 
 ## Tooling
 
-Use the installed CLI directly from `PATH`. If `pvc` is missing:
+Prefer the CLI on `PATH`. When this repo has been cloned into the agent's own
+machine (the normal Muse-VM case), the CLI lives at `.venv/bin/pvc` after
+`bash bootstrap.sh`, and there is no HTTP service at all: `pvc push` runs the
+whole job locally. `--service`/`PVC_SERVICE_URL` is only for a hosted deployment.
+
+If `pvc` is missing:
 `python3 -m pip install --user pickvedio-core`, or `pip install -e .` from a
 clone of the repo (extras: `media` for yt-dlp, `local-asr` for faster-whisper,
 `service` for the FastAPI app).
@@ -73,9 +78,12 @@ Follow in order, stop at the first tier that yields real speech text. 逐级降�
    `b23.tv`, `?bvid=`, bare `BV…`, Shorts and `youtu.be` all canonicalise here.
    Several links in one message -> ask which one, or handle in reading order and
    say so.
-2. **Ask the service.** `pvc fetch --url "<canonical url>"` (add `--service` /
-   set `PVC_SERVICE_URL` when the user has a deployment). Short video with the
-   service configured and summarisation wanted: `pvc summarize --url … --style brief`.
+2. **Ask the local resolver, or the service if there is one.**
+   `pvc fetch --url "<canonical url>"` (add `--service` / set `PVC_SERVICE_URL`
+   only when the user has a deployment). Ready to summarise straight away:
+   `pvc summarize --url … --style brief`. Before spending on a long video,
+   `pvc summarize --url … --estimate-only` reports chunk count and expected
+   model calls and touches no provider.
 3. **On `needs_browser`, relay.** Do not retry `fetch` and do not add cookies to
    it. Open the canonical URL in the logged-in cloud browser, evaluate
    `assets/browser-extract.js`, save the result as `relay.json`, then

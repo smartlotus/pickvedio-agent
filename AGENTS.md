@@ -41,6 +41,15 @@ video's captions require a session the user does not have, say so.
 
 ## Deploy
 
+The shortest correct answer for an agent that has its own machine (a Muse VM):
+
+```
+bash bootstrap.sh          # venv + install + offline self-test + what is still missing
+```
+
+It ends with `verdict: READY` or a named failure; CI runs the same two commands
+from a fresh clone. Manual route, if you prefer:
+
 ```
 pip install -e '.[service,media]'        # or: pip install pickvedio-core
 uvicorn service.app:app --host 0.0.0.0 --port "$PORT"

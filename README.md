@@ -54,7 +54,8 @@ logged-in browser.
 ## 快速开始 / quick start
 
 ```bash
-pip install -e '.[dev]'          # 或 pip install pickvedio-core
+bash bootstrap.sh                # 建 venv + 装依赖 + 离线自检，最后一行应是 verdict: READY
+pip install -e '.[dev]'          # 手动等价做法，或 pip install pickvedio-core
 
 pvc check                        # 离线自检，不联网、不调用模型
 pvc status                       # 当前部署能用哪些通道，缺哪些环境变量

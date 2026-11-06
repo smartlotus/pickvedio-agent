@@ -20,6 +20,7 @@ reader; ``json`` (the default) is what every documented example uses.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -720,7 +721,24 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _force_utf8() -> None:
+    """Make stdout UTF-8 no matter what codepage the host console reports.
+
+    The contract is "stdout is exactly one JSON object". On Windows a redirected
+    stream inherits the active codepage (cp936 here), so a report containing
+    Chinese titles came out as bytes that are not valid JSON for any consumer
+    that decoded them as UTF-8 -- including this project's own bootstrap script.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        # Some environments hand us a stream that cannot be reconfigured (a
+        # captured buffer in a test, a closed handle); those keep whatever
+        # encoding they have rather than failing the command.
+        with contextlib.suppress(AttributeError, ValueError, OSError):
+            stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8()
     parser = build_parser()
     args = parser.parse_args(argv)
     level = logging.INFO if args.verbose else logging.WARNING

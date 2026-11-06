@@ -140,3 +140,8 @@ Desktop.ini
 logs/
 /tmp/
 /celerybeat-schedule
+
+# bootstrap.sh reports (regenerated every run, machine-local paths inside)
+.bootstrap-check.json
+.bootstrap-status.json
+.venv*/
