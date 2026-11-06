@@ -20,8 +20,18 @@ on:
         required: true
         default: ""
 
+# The ceiling for `GITHUB_TOKEN` in this file. A job may only *narrow* what the
+# workflow level grants, so the two scopes any job needs are listed here and
+# every job then asks for its own subset. This is not theoretical: with
+# `contents: read` at this level, the first real v1.0.0 run failed inside the
+# release job with `HTTP 403: Resource not accessible by integration` even
+# though that job asked for `contents: write`.
+#   contents: write -> only the GitHub Release job (create + upload assets)
+#   id-token:  write -> only the PyPI job (OIDC trusted publishing)
+# No secrets are read here at all; there is deliberately no API token.
 permissions:
-  contents: read
+  contents: write
+  id-token: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -39,6 +49,8 @@ jobs:
   build:
     name: Build sdist, wheel and skill pack
     runs-on: ubuntu-latest
+    permissions:
+      contents: read # checkout + build only; cannot write anything back
     steps:
       - name: Checkout the tag
         uses: actions/checkout@v4
@@ -122,9 +134,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      # Needed only to create the release and upload its assets. The default
-      # `contents: read` from the workflow level is restored for every other job.
+      # The only job that writes: create the release, upload its assets. It gets
+      # no OIDC token, so it cannot reach PyPI even in principle.
       contents: write
+      id-token: none
     steps:
       - name: Download dist
         uses: actions/download-artifact@v4
