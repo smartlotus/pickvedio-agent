@@ -137,8 +137,16 @@ def create_app(settings: Settings | None = None, *, worker_count: int | None = N
     def style_or_400(value: str) -> str:
         style = (value or settings.style).strip()
         if style not in PROFILE_LABELS:
-            raise ConfigurationError(
+            error = ConfigurationError(
                 f"未知总结档位 {style!r}。可选：{'、'.join(PROFILE_LABELS)}。")
+            # The remedy belongs in `data.hint`, not only in the sentence: the
+            # ladder's rule is "read code, message and data.hint before deciding
+            # anything", and this failure used to arrive with no hint at all,
+            # leaving the agent to re-derive the list from the message text.
+            error.hint = (
+                f"改用其中之一重发同一请求，或让部署设 PVC_STYLE 指定默认档位；"
+                f"要拿完整档位说明用 `pvc profiles`。可选：{'、'.join(PROFILE_LABELS)}。")
+            raise error
         return style
 
     def launch(job_id: str, url: str, style: str, *, relay_payload: Any = None,

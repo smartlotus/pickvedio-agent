@@ -1135,6 +1135,37 @@ fail-closed 而不是崩、422 `invalid_request` 去照 `/openapi.json` 的例�
 1 个测试文件收集失败——于是我**把两个文件整体退回 HEAD**，改做小而有据的这一步。
 判据：169 测试 0 失败，ruff 干净。
 
+### 5bb. 统一嵌套的尝试先退回，把债写成棘轮；顺带补上"未知档位"没有 remedy 的缺口
+
+按 §5aa 留下的头号待办动手（成功回复的业务字段收进 `data`）。做法是先加一个
+`reply()` 包装器、逐个 return 站点包一层，不改写字段本体 —— 结果两件事同时暴露：
+
+1. `launch()` / `submit()` 的返回 dict 会被**调用方继续改**（`result["relayed"] = True`），
+   所以把响应对象从内部辅助函数里返回是错的，必须在 handler 边界包；
+   这条不是风格问题，是 TypeError 直接指出来的。
+2. 一次跨 13 处的脚本改写打断了两处语法（healthz 的收尾括号、以及我把装饰器缩进
+   改坏了一处），13 个测试同时红 —— 其中大部分是 CLI 远端读法与十几处测试断言
+   还按顶层键取值，那是这次改动**应该**要求的连带修改，但工作量明显需要单独一次
+   带文档与 skill 包的发布，不该夹带在"顺手收一下"里。
+
+于是把 `src/service/app.py` 与 `src/pvc/cli.py` **整体退回 HEAD**（169 测试复绿），
+改成把这个债冻结成棘轮：`tests/test_envelope_ratchet.py` 用真实跑起来的服务量出
+每个端点当前铺在顶层的业务字段清单并写死；
+- 新增字段或新端点用老写法 → 红（新端点若没被登记进清单，也直接红，不给"默认通过"）；
+- 清单里的字段变少 → 绿。也就是说真正做统一时这道门会自动放宽，不需要人记得改它。
+
+量出来的清单（1.0.14 实况）：`/healthz` 铺 10 个、`/v1/profiles` 3 个、
+`/v1/capabilities` 2 个、`/v1/jobs` 1 个、`GET /v1/jobs/<id>` 18 个、
+`POST /v1/jobs` 3 个、cancel 1 个；`GET /v1/jobs/<id>/report` 的 409 已是 0 个。
+
+棘轮里那条"每个失败回复都得带 `data.hint`"一上来就红，红得有理：
+`style_or_400` 抛的 `ConfigurationError` **不带任何 hint**，只把可选档位列在句子里 ——
+阶梯规定"先读 code、message 和 `data.hint` 再决定"，这一条失败却要求 agent 自己
+从自然语言里重新推导。现在补上 remedy（改用其中之一 / 设 `PVC_STYLE` /
+`pvc profiles` 看完整说明），并把断言留在原地。这条是本轮唯一"测试比我先想到"的收获。
+
+172 测试 0 失败，ruff 干净；`GET /v1/jobs/<id>/report` 之外的一致性仍在 §6 待办上。
+
 ## 6. 尚未验证 / still to verify after deployment
 - Nesting the *success* payloads of the meta endpoints under `data` (the error
   replies are flat since 1.0.12; `/v1/profiles` and friends still answer with
