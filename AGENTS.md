@@ -52,7 +52,7 @@ from a fresh clone. Manual route, if you prefer:
 
 ```
 pip install -e '.[service,media]'        # in the checkout; off-checkout use the git+ URL
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.17"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.18"
                                         # the PyPI name does not exist -- see docs gate in ci.yml
 uvicorn service.app:app --host 0.0.0.0 --port "$PORT"
 ```
