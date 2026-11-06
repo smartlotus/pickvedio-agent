@@ -54,7 +54,7 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
    默认不需要 ffmpeg：字幕由你的浏览器取，服务器只做分段和总结。
 2. 设置这些环境变量（值我自己给，你不要替我编造，也不要打印出来）：
    PVC_API_TOKEN、PVC_LLM_PROVIDER、PVC_LLM_API_KEY、PVC_LLM_MODEL、
-   PVC_CHUNK_CHARS=9000、PVC_MAX_MINUTES=180、PVC_STYLE=general、
+   PVC_CHUNK_CHARS=18000、PVC_MAX_MINUTES=180、PVC_STYLE=general、
    PVC_KEEP_MEDIA=0、PVC_WORKDIR=/data。
    PVC_ASR_PROVIDER 先留空，等我确认要花钱再开。
 3. 给服务挂一个 Volume，挂载路径 /data（不挂卷的话重新部署会丢掉任务状态）。
