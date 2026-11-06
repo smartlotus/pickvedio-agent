@@ -1166,6 +1166,13 @@ fail-closed 而不是崩、422 `invalid_request` 去照 `/openapi.json` 的例�
 
 172 测试 0 失败，ruff 干净；`GET /v1/jobs/<id>/report` 之外的一致性仍在 §6 待办上。
 
+发布后在**装出来的 1.0.15 wheel** 上打真 HTTP（`pvc serve` 起在 127.0.0.1，
+wheel 字节 sha256 `0cf4aee4…` 与 REST `digest` 相等）：
+`POST /v1/jobs` 用未知档位 → `400 / code=configuration`、`data.hint` 在位且真提到
+`pvc profiles`、顶层没有 `detail`；用合法档位 → `200 / code=queued`。
+（探针第一次跑失败是因为我把 `[service]` 装漏了，`ModuleNotFoundError: fastapi`
+——那是探针的错，不是产品的错，重装后同一判据立刻绿。）
+
 ## 6. 尚未验证 / still to verify after deployment
 - Nesting the *success* payloads of the meta endpoints under `data` (the error
   replies are flat since 1.0.12; `/v1/profiles` and friends still answer with
