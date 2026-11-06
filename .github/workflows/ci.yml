@@ -226,7 +226,10 @@ jobs:
           VERSION=$(python -c "import re,pathlib; print(re.search(r'^version = \"([^\"]+)\"', pathlib.Path('pyproject.toml').read_text(encoding='utf-8'), re.M).group(1))")
           echo "PVC_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "PVC_INSTALL_SPEC=pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v$VERSION" >> "$GITHUB_ENV"
-          echo "PVC_WHEEL_URL=https://github.com/smartlotus/pickvedio-agent/releases/download/v$VERSION/pickvedio_core-$VERSION-py3-none-any.whl" >> "$GITHUB_ENV"
+          # Deliberately no wheel URL here: this job runs on every push, and the
+          # asset for a version only exists once that version is tagged and the
+          # Release workflow has published it. The anonymous `releases/download`
+          # route is proven in release.yml, where the upload just happened.
           echo "install spec under test: $VERSION"
 
       - name: Every documented pin is this version

@@ -56,13 +56,14 @@ logged-in browser.
 ```bash
 bash bootstrap.sh                # 建 venv + 装依赖 + 离线自检，最后一行应是 verdict: READY
 python3 -m pip install -e '.[dev]'   # 手动等价做法（在仓库目录里）
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.6"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.7"
                                     # 不在仓库里时的安装法。注意：这个名字没有发到 PyPI，
                                     # `pip install pickvedio-core` 会报 No matching
                                     # distribution found —— 必须带 git+ 地址
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.6/pickvedio_core-1.0.6-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.7/pickvedio_core-1.0.7-py3-none-any.whl"
                                     # 机器上没有 git 时的等价做法：直接装 Release 附件，
-                                    # 匿名可下载，已实测 pip 能取到并装上 1.0.6
+                                    # 匿名可下载（这行在 1.0.4 上实测 pip 取到并装成功；
+                                    # 若这台机到 github.com 的 TLS 已经坏了，见下面那段）
 
 pvc check                        # 离线自检，不联网、不调用模型
 pvc status                       # 当前部署能用哪些通道，缺哪些环境变量
@@ -72,6 +73,14 @@ export PVC_LLM_PROVIDER=deepseek
 export PVC_LLM_API_KEY=sk-...
 pvc summarize "https://www.bilibili.com/video/BV1rjKn6CETw/" --style brief
 ```
+
+如果那台机器到 `github.com` 的 443 直接被 reset 或超时（不是这个项目的问题，是它自己的
+出口问题；本仓库的 `releases/download` 是不需要登录的），有两条不改结论的替代路：
+一条是给上面那条 pip 命令挂上该机器本来就配好的代理；另一条是先取字节再装本地文件——
+`gh api -H "Accept: application/octet-stream" repos/smartlotus/pickvedio-agent/releases/assets/<id>`
+能把同一份 wheel 原样取下来（`<id>` 从 `gh api repos/smartlotus/pickvedio-agent/releases/tags/<tag>`
+的 `assets[].id` 里读），同一份 JSON 的 `digest` 字段就是它的 sha256，先核对再装。
+两条路装的是同一个文件，`Release` workflow 里还有一道门每次发版都从公网匿名 pip 装一次那个 URL。
 
 云端部署 / deployed:
 

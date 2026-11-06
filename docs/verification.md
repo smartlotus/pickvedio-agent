@@ -717,6 +717,30 @@ Muse 装的从来不是仓库源码，而是 release 里那个 `video-summary-sk
   troubleshooting/`__init__`）一次扫齐，CI 的"文档里的 pin 必须等于 pyproject 版本"
   那道门会当场否掉漏网的。代码相对 1.0.5 只差 §5o 说的两处纯样式。
 
+### 5q. README 那条"直接装 Release 附件"到底被谁验过（答案是：没人）
+
+- 在这台机按 README 原句跑了一遍 pip：`Connection to github.com timed out`
+  （connect timeout=15，两轮都是），`netstat` 查 7897/7890/7891 一个都没监听，
+  所以既不是文件不存在也不是命令写错，是这台机此刻到 github.com 的 443 出不去。
+  同一份字节改走 API 资产口取到并与 REST `digest` 核对相等——§5p 记的那条通道。
+- 于是去问"这条被文档化的路有没有门禁"：ci.yml 的 Install 作业导出过
+  `PVC_WHEEL_URL`，但全文再无第二次引用（`grep -n '\$PVC_WHEEL_URL'` 零命中）。
+  也就是说 README 让 agent 抄的那条 URL 从来没被任何一次 CI 跑过；
+  那个名字留在原地只会让下一个读的人以为它被测。
+- 处理：把那行死导出删掉并注明"这个作业跑在每次 push 上，而未发版的版本没有资产，
+  放在这里必然假失败"；真正该验的地方是 Release 作业——它刚把资产传上去，
+  那一刻那个 URL 必然存在。新增两步：`setup-python@v7`（ubuntu 自带的 python3
+  没有 ensurepip，Bootstrap 作业就是专门证这点的，不先装解释器 `python -m venv` 就红），
+  然后 `curl -fsSI` 那个匿名 URL、在干净 venv 里按 README 同一条 pip 行装它、
+  再跑 `pvc check` 断言 `ok` 且 `network_used is false`（断言字段与 Install 作业里
+  已在跑的用法一致，不新造判据）。
+- 这一版本地能证的都证了，剩下的只能等它自己跑：两个 workflow 文件 `yaml.safe_load`
+  通过、步骤顺序是 Download→Create→Set up Python→wheel URL 证明；把
+  `RELEASE_TAG`/`GITHUB_REPOSITORY` 代进去构造出的 URL 与 README、runbook 里那行逐字符相同；
+  `releases/tags/v1.0.6` 的资产名与该构造式一致。**没证的只有"runner 上 pip 真能从公网
+  取到它"**——正因如此这一版要发 v1.0.7：新门不当场跑一次，就等于把一条没跑过的
+  步骤写进发布链。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

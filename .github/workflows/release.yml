@@ -217,6 +217,36 @@ jobs:
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json tagName,targetCommitish,assets \
             --jq '{tag:.tagName, target:.targetCommitish, assets:[.assets[].name]}'
 
+      - name: Set up Python for the install proof
+        # The ubuntu runner's own python3 has no ensurepip (the Bootstrap job in
+        # ci.yml proves that on purpose), so `python -m venv` needs a real
+        # interpreter here rather than the image default.
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: The wheel URL the README documents installs anonymously
+        # Second documented route ("no git on this machine"), and until now the
+        # one CI never executed: ci.yml exported PVC_WHEEL_URL and then ignored
+        # it. This job is the only place the asset necessarily exists at that
+        # exact URL -- it was uploaded three steps above -- and the install is
+        # deliberately unauthenticated, because a phone-side agent has no token.
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          URL="https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/pickvedio_core-$VERSION-py3-none-any.whl"
+          echo "proof target: $URL"
+          curl -fsSI -o /dev/null "$URL"
+          python -m venv .venv-url
+          .venv-url/bin/python -m pip install --quiet --disable-pip-version-check \
+            "pickvedio-core[service] @ $URL"
+          .venv-url/bin/pvc check | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          assert d['ok'], d
+          assert d['data']['network_used'] is False, d['data']
+          print('documented wheel URL installed and self-tested:', d['code'])
+          "
+
   pypi:
     name: Publish to PyPI (trusted publishing)
     needs: build
