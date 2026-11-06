@@ -34,6 +34,16 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      - name: No working or output directories are tracked
+        # An accidental `git add -A` once published a SQLite job database and
+        # generated reports whose write-ahead log contained this machine's
+        # absolute path. Cheap check, permanent gate.
+        run: |
+          bad=$(git ls-files | grep -E '(^|/)[A-Za-z0-9_-]*-work/|\.sqlite3-(shm|wal|journal)$' || true)
+          if [ -n "$bad" ]; then
+            echo "these must never be tracked:"; echo "$bad"; exit 1
+          fi
+          echo "no job state, media or database sidecar files tracked"
       - name: Install project with dev extras
         # Editable install so the `pvc` console script exists on PATH for the
         # later steps of every job.

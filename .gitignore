@@ -63,7 +63,16 @@ nosetests.xml
 # does, add that path here too. Everything below is anchored or named
 # specifically, so it can never swallow a source package that happens to share
 # a word (e.g. a future src/pickvedio_core/jobs/ or /models/ package).
+# Every working/output directory, not just the default name: a demo run with
+# PVC_WORKDIR elsewhere must not be able to reach a commit again.
 pickvedio-work/
+pickvedio-*-work/
+*-work/
+# SQLite sidecar files: `*.sqlite3` does NOT cover jobs.sqlite3-shm / -wal,
+# and the -wal carried an absolute path into a public commit once.
+*.sqlite3-shm
+*.sqlite3-wal
+*.sqlite3-journal
 *.sqlite3
 *.sqlite
 *.db
