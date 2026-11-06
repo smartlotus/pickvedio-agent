@@ -145,7 +145,7 @@ def resolve(
         except PickvedioError as exc:
             attempts.append(_attempt("bilibili_subtitles", exc))
     elif ref.platform == "youtube":
-        client = youtube_module.YoutubeClient(cookie_file=settings.cookie_file)
+        client = youtube_module.YoutubeClient(cookie_file=settings.youtube_cookie_file)
         started = time.monotonic()
         try:
             transcript = client.transcript(url)
@@ -186,7 +186,8 @@ def resolve(
 
         channel = audio_module.AudioPipeline(
             ffmpeg_path=settings.ffmpeg_path,
-            cookie_file=settings.cookie_file,
+            cookie_file=(settings.youtube_cookie_file if ref.platform == "youtube"
+                        else settings.cookie_file),
             sessdata=settings.sessdata,
             chunk_seconds=settings.audio.chunk_seconds,
         )

@@ -242,6 +242,7 @@ class Settings:
     workdir: Path = field(default_factory=lambda: Path("pickvedio-work"))
     ffmpeg_path: str = ""
     cookie_file: str = ""
+    youtube_cookie_file: str = ""
     sessdata: str = ""
     api_token: str = ""
     chunk_chars: int = 18000
@@ -273,6 +274,8 @@ class Settings:
             workdir=Path(_env("PVC_WORKDIR", "PVC_WORK_DIR", default="") or "pickvedio-work"),
             ffmpeg_path=_env("PVC_FFMPEG", "FFMPEG_PATH"),
             cookie_file=_env("PVC_COOKIE_FILE", "PVC_COOKIES"),
+            youtube_cookie_file=_env("PVC_YOUTUBE_COOKIE_FILE", default="")
+            or _env("PVC_COOKIE_FILE", "PVC_COOKIES"),
             sessdata=_env("PVC_BILIBILI_SESSDATA"),
             api_token=_env("PVC_API_TOKEN", "PVC_AUTH_TOKEN"),
             chunk_chars=_env_int("PVC_CHUNK_CHARS", default=int(summary_seed.get("chunk_chars") or 18000)),
