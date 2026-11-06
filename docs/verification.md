@@ -387,6 +387,24 @@ B 证明修复确实把"没设 provider 但设了远程端点"这一形态从 Ol
 服务鉴权门禁同时复验：不带令牌 POST `/v1/jobs` → 401。
 三个测试进程用完即杀，端口 8931-8933 复查为 0 监听。
 
+## 5g. 为什么出 v1.0.1：发布件会比 HEAD 陈旧
+
+v1.0.0 的三个附件是从 tag 提交 9b6cdf2 构建的，而 tag 之后 main 上落了四处修复。真正的风险不是
+"版本号不好看"，是 **skill zip 里那份 `SKILL.md` 是旧的**：它仍然写着"失败时读
+`code`、`message` 和 `hint`"，而 `hint` 一直在 `data` 里面——照那份 zip 装技能的 agent
+会去读一个不存在的键，然后把它遇到的每个失败都当成"服务没给提示"。同理，wheel 里既没有
+`short_link` 表态，也还带着桌面 seed 抢通道的配置缺陷。
+
+所以把版本推到 1.0.1，让"文档里那条 pin"、`install_spec()`、CI 的 `PVC_INSTALL_SPEC` 与
+发布件四者重新对齐。机制上这次对齐是可检查的，不是靠人记得：
+
+- `pickvedio_core.install_spec()` 直接拼 `__version__`，运行时报的安装地址不会落后；
+- CI 的 install job 断言 README 里出现的就是它自己要执行的那一整串；
+- 文档门禁扫描全部随包 md，任何"像命令"的安装行都必须带可解析的来源。
+
+`verification.md` 上面 §5d–§5f 里那些 `v1.0.0` 字面量是**历史记录**，不跟着 bump 改，
+它们描述的就是当时那次发布。
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.
