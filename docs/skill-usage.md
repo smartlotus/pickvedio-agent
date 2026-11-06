@@ -23,17 +23,19 @@ but without one every run pays a cold-start and installs dependencies again.
 
 ## 2. 安装 skill Install the skill into Muse
 
-Muse skills are directories at `opt/hatch/skills/<name>/` with a `SKILL.md`, an
-optional `manifest.yaml`, `references/`, `assets/` and `eval/`, and every skill is
-listed in the registry `config/skills.yaml`. Copy this directory in and add one
-registry entry:
+Muse skills are directories at `/opt/hatch/skills/<name>/` (absolute) with a
+`SKILL.md`, an optional `manifest.yaml`, `references/`, `assets/` and `eval/`.
+The registry is `/home/hatch/config/skills.yaml`: `version: 1` plus an `entries:`
+map whose keys use underscores even when the directory uses hyphens. Copy this
+directory in and add one registry entry:
 
 ```bash
 # on the Muse VM
 mkdir -p /opt/hatch/skills
 cp -r skills/video-summary /opt/hatch/skills/
-# registry entry
-video-summary: {status: available}
+# registry entry in /home/hatch/config/skills.yaml, under entries:
+#   video_summary:
+#     status: available
 ```
 
 诚实说明：以上是 Muse 自带 skill 的确切磁盘结构与命名约定（对照 `calendly` 的

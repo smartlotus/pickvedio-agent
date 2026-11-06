@@ -910,6 +910,43 @@ Anaconda 自带 PyYAML，而 Test 作业只装 `.[dev]`。这是本轮第二次�
 不是 hint 缺内容（测试里对同一 hint 的断言用的是 `提取时机太早`，CI 全绿）。
 不为凑探针去改 hint 文本；记录在这儿是因为"探针红了"和"产品红了"必须分清。
 
+### 5w. 用公开的运行时快照核对"Muse 怎么装技能"，改掉一处会让第 2 步静默失败的写法
+
+目标里"把仓库链接给它，它自己完成部署"这一步，依赖两条我此前**只是按记忆写**的事实：
+技能目录在哪、以及怎么让它出现在可用列表里。这次找了外部材料交叉核对
+（都不是本机可证的，性质是"独立来源"而不是"实测"，所以和 §6 那批待验事项区分记着）：
+
+- 一次 6.8 GB 的文件系统导出记录写明：Hatch 是 Meta 内部对 Muse 的称呼、运行时文件里
+  一路用它，且"在 `/opt/hatch/skills/` 下数到约 68 个技能目录"；
+  另一份快照仓库（win4r/MuseAI-Skills）里也是同样布局，例如
+  `opt/hatch/skills/gmail/{SKILL.md,manifest.yaml}`。
+- 那份快照带 `home/hatch/config/skills.yaml`，形状是
+  `version: 1` + `entries:` + `<名字>: {status: available}`，
+  而**键是下划线**（目录 `facebook-cli` → 条目 `facebook_cli`），目录名却是连字符。
+- 代码搜索证实我用过的 manifest 键都真存在：`consent_screen`（plaid/granola/peloton）、
+  `cli_subcommands`（tts/duffel/messenger）、`request_quota`（granola/threads/peloton）、
+  `approval_phrase`（plaid/notion/tessie），SKILL.md 里也确有 `metadata.includeInPrompt`
+  （muse_db/tailscale/artifacts·pdf）。`version: 1` 就是 manifest 的模式号，不是包版本
+  （§5p 那句判断得到外部支持）。
+
+改的缺陷：文档里 6 处写的是**没有前导斜杠**的 `opt/hatch/skills/video-summary/`。
+照字面执行会把技能拷进 clone 自己的目录里，运行时永远看不见它——第 2 步不报错，
+只是"没这个技能"，这正是最难查的那种失败。另外"在 skills 配置里登记为 available"
+不是个动作：现在写死了文件 `/home/hatch/config/skills.yaml`、条目形状、
+下划线键与连字符目录的区别，并要求装完贴出
+`ls /opt/hatch/skills/video-summary/` 与 `grep -A2 video_summary …` 的输出，
+同时明确"如果这台机的目录不是 /opt/hatch/skills，就照本机实际写法来并把 ls 贴给我，
+不要猜第三个路径"——把"外部来源"该带的不确定，转成可观察的自查，而不是继续当前提。
+
+新门禁 `test_skill_install_instructions_name_an_absolute_path_and_the_right_key`：
+相对路径 0 处、绝对提及 ≥6（防空转）、五份文档都点名注册文件与 `video_summary` 键，
+内建 planted 反例（`cp … opt/hatch/skills/`）必须被判红。
+
+来源（外部材料，非本机实测）：
+- Meta Muse 文件系统导出复盘：https://aihot.virxact.com/items/cmucwvmws0rooroedsocdf7lw
+- 运行时快照仓库：https://github.com/win4r/MuseAI-Skills
+- IT之家对同一导出的报道（约 68 个技能目录）：https://m.10jqka.com.cn/20260925/c680281420.shtml
+
 ## 6. 尚未验证 / still to verify after deployment
 - A real Railway (or other) deploy answering `/healthz` over the public internet.
 - Muse actually reading this repo and deploying it from a GitHub URL.

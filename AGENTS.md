@@ -52,7 +52,7 @@ from a fresh clone. Manual route, if you prefer:
 
 ```
 pip install -e '.[service,media]'        # in the checkout; off-checkout use the git+ URL
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.9"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.10"
                                         # the PyPI name does not exist -- see docs gate in ci.yml
 uvicorn service.app:app --host 0.0.0.0 --port "$PORT"
 ```
@@ -165,8 +165,10 @@ ported byte-for-byte from the desktop app. Override any of them by dropping
    by anyone but you.
 4. `curl …/healthz` then `pvc --service … status`.
 5. Install [`skills/video-summary`](skills/video-summary) into your skill
-   directory (for Muse: `opt/hatch/skills/video-summary/`), and register it in
-   the skills config as `available`.
+   directory (for Muse: `/opt/hatch/skills/video-summary/`, absolute path), and
+   register it in `/home/hatch/config/skills.yaml` under
+   `entries: {video_summary: {status: available}}` -- the key is underscored even
+   though the directory is hyphenated.
 6. Run the browser extractor once against a logged-in Bilibili page and confirm
    `segments` is non-empty. This is the step that has **not** been verified by
    the author of this repo — see `docs/verification.md` § 4 item 2. If it fails,

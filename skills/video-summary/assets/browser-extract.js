@@ -1,6 +1,6 @@
 /*
  * pickvedio-agent :: browser transcript extractor
- * opt/hatch/skills/video-summary/assets/browser-extract.js
+ * /opt/hatch/skills/video-summary/assets/browser-extract.js
  *
  * WHAT THIS IS
  * Run this ON the video page itself - a Bilibili video page or a YouTube watch

@@ -62,9 +62,20 @@ Do these in order, and show me the raw command and the raw output of every step:
     and prints what is still missing. The last line must be "verdict: READY". If it
     is not, paste the output and stop -- do not improvise another install method.)
 
-2. Install the skill: copy the repo's skills/video-summary/ directory into
-   opt/hatch/skills/video-summary/ and register it as available. Then read SKILL.md
-   once more and follow the ladder it describes for the rest of this session.
+2. Install the skill: copy the repo's skills/video-summary/ directory to the
+   absolute path /opt/hatch/skills/video-summary/ (note the leading slash -- a
+   relative one would land inside the repo and load nothing), then register it in
+   /home/hatch/config/skills.yaml in the shape the file already uses:
+   version: 1 / entries: / video_summary: / status: available
+   (the registration key is `video_summary` with an underscore, while the skill
+   directory is `video-summary` with a hyphen; copy the convention from the
+   entries already in that file). Afterwards show me the raw output of
+   `ls /opt/hatch/skills/video-summary/` and
+   `grep -A2 video_summary /home/hatch/config/skills.yaml`. If this machine's
+   skill directory is not /opt/hatch/skills, follow whatever the machine actually
+   uses and paste `ls /opt/hatch/skills | head` -- do not invent a third path.
+   Then read SKILL.md again and follow the ladder it describes for the rest of
+   this session.
 
 3. I will send you a Bilibili or YouTube link. You should:
    a. run `.venv/bin/pvc resolve --url "<what I sent>"` to get the canonical link;
@@ -190,10 +201,10 @@ Honest list, because each one changes how the agent must behave:
 
 ```bash
 # pickvedio-core is not on PyPI; install it from this repository.
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.9"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.10"
 # or, from a clone: bash bootstrap.sh   (creates ./.venv and self-tests it)
 # or, with no git on the machine: the wheel attached to the tag (anonymous GET)
-python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.9/pickvedio_core-1.0.9-py3-none-any.whl"
+python3 -m pip install "pickvedio-core[service] @ https://github.com/smartlotus/pickvedio-agent/releases/download/v1.0.10/pickvedio_core-1.0.10-py3-none-any.whl"
 cat > ~/.pvc.env <<'ENV'
 export PVC_SERVICE_URL="https://<hostname>"
 export PVC_API_TOKEN="<inbound token>"

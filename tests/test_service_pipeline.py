@@ -933,3 +933,55 @@ def test_job_store_prune_only_removes_old_ones(tmp_path):
     store.fail(fresh.id, "boom")
     assert store.prune(keep_days=14.0) == 0
     assert store.get(fresh.id).status == "failed"
+
+
+def test_skill_install_instructions_name_an_absolute_path_and_the_right_key():
+    """Muse loads skills from `/opt/hatch/skills/<name>` and registers them in
+    `/home/hatch/config/skills.yaml` with an underscored key.
+
+    Both halves were measured against a published runtime snapshot
+    (docs/verification.md §5w): roughly 68 skill directories under
+    `/opt/hatch/skills/`, and a registry shaped `version: 1` / `entries:` /
+    `<name_with_underscores>: {status: available}` -- while the directories
+    themselves are hyphenated (`facebook-cli` -> `facebook_cli`).
+
+    The instructions used to say `opt/hatch/skills/video-summary/` (no leading
+    slash), which an agent happily creates *inside the clone*, and "register it in
+    the skills config", which is not an action. A relative path here is not a typo
+    of style: it is the difference between a skill that loads and one that never
+    existed as far as the runtime is concerned.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    files = [root / "README.md", root / "AGENTS.md"]
+    for directory in ("docs", "deploy", "prompts", "skills"):
+        files.extend(sorted((root / directory).rglob("*.md")))
+        files.extend(sorted((root / directory).rglob("*.js")))
+
+    relative = re.compile(r"(?<![/\w-])opt/hatch")
+    absolute = re.compile(r"/opt/hatch/skills")
+    offenders, absolutes = [], 0
+    for path in files:
+        if not path.is_file() or path.name == "verification.md" or "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        absolutes += len(absolute.findall(text))
+        for number, line in enumerate(text.splitlines(), start=1):
+            if relative.search(line):
+                offenders.append(f"{path.relative_to(root)}:{number}: {line.strip()[:90]}")
+
+    assert not offenders, f"relative skill paths would install into the clone: {offenders}"
+    assert absolutes >= 6, f"only {absolutes} absolute mentions; the scanner matches nothing"
+
+    for relative_name in ("README.md", "AGENTS.md", "deploy/muse-setup.md",
+                          "skills/video-summary/references/deploy-runbook.md",
+                          "docs/skill-usage.md"):
+        text = (root / relative_name).read_text(encoding="utf-8")
+        assert "/home/hatch/config/skills.yaml" in text, f"{relative_name} omits the registry path"
+        assert "video_summary" in text, f"{relative_name} omits the underscored registry key"
+
+    planted = "cp -r skills/video-summary opt/hatch/skills/"
+    assert relative.search(planted), "the relative-path classifier lost its teeth"
+    assert not relative.search("cp -r skills/video-summary /opt/hatch/skills/")

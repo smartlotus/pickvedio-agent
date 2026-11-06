@@ -56,8 +56,18 @@ https://github.com/smartlotus/pickvedio-agent
    （这个脚本会建 venv、装依赖、跑离线自检 pvc check、并报告还缺哪些配置。
      必须看到最后一行 "verdict: READY"。没看到就把输出贴给我并停下，不要自己另想办法装。）
 
-2. 把技能装进你的技能目录：仓库里的 skills/video-summary/ 整个拷到
-   opt/hatch/skills/video-summary/，并在 skills 配置里登记为 available。
+2. 把技能装进你的技能目录：把仓库里的 skills/video-summary/ 整个拷到
+   /opt/hatch/skills/video-summary/（注意开头的斜杠，这是绝对路径），
+   再在 /home/hatch/config/skills.yaml 里登记，形状照它已有的条目：
+   version: 1
+   entries:
+     video_summary:
+       status: available
+   （登记键用下划线 video_summary，和技能目录名 video-summary 不同——照本机其它条目学。）
+   装完先自查并把结果贴给我：ls /opt/hatch/skills/video-summary/、
+   grep -A2 video_summary /home/hatch/config/skills.yaml。
+   如果你这台机的技能目录不是 /opt/hatch/skills，就照本机已有技能的实际写法来，
+   并把 `ls /opt/hatch/skills | head` 的输出贴给我，不要猜第三个路径。
    然后重读一遍 SKILL.md，之后都按它写的判定阶梯办事。
 
 3. 我会给你一个 B 站或 YouTube 链接。你要：
@@ -164,7 +174,7 @@ pvc 命令行：https://github.com/smartlotus/pickvedio-agent
 ```bash
 curl -fsS "https://<域名>/healthz"                      # -> 200，免令牌
 curl -fsS "https://<域名>/v1/profiles" -H "Authorization: Bearer $PVC_API_TOKEN"
-python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.9"
+python3 -m pip install "pickvedio-core @ git+https://github.com/smartlotus/pickvedio-agent@v1.0.10"
                                                          # 这个名字不在 PyPI 上，必须带 git+ 地址；
                                                          # clone 过的话用 bash bootstrap.sh 更省事
 export PVC_SERVICE_URL="https://<域名>"
