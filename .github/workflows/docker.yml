@@ -62,7 +62,7 @@ jobs:
         # as the package is set to "this repository" visibility, then made
         # public. First push may need the package created manually:
         # ghcr.io/smartlotus/pickvedio-core -> Settings -> Public.
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
